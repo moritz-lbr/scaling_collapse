@@ -1,0 +1,22 @@
+simulation_parameters:
+  network:
+    activations_per_layer:
+      Dense_0: relu
+      Dense_1: relu
+      Dense_2: identity
+    nodes_per_layer:
+      Dense_0: 128
+      Dense_1: 128
+      Dense_2: 1
+    param_scheme: muP
+    base_layer_widths:
+      Dense_0: 64
+      Dense_1: 64
+      Dense_2: 1
+  training:
+    lr: 0.001
+    task: scheme-standard_widths-256x256x1
+    test_split: 0.2
+    batch_size: 256
+    epochs: 10     # Epochs refers to the number of full passes through the training data
+    save_loss_frequency: "epoch"  # Save training and test losses every n batches; set to "epoch" to save only at epoch end

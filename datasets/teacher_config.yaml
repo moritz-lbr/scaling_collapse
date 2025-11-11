@@ -1,0 +1,18 @@
+simulation_parameters:
+  network:
+    activations_per_layer:
+      Dense_0: relu
+      Dense_1: relu
+      Dense_2: identity
+    nodes_per_layer:
+      Dense_0: 256
+      Dense_1: 256
+      Dense_2: 1
+  data:
+    target: teacher
+    teacher_data_dir: datasets/teacher_data
+    samples: 200000
+    input_dim: 32
+    output_dim: 1
+    distribution: normal
+    noise_std: 0.0

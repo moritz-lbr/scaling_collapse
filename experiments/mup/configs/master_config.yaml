@@ -1,0 +1,13 @@
+simulation_parameters:
+  network:
+    base_layer_widths:
+      Dense_0: 64
+      Dense_1: 64
+      Dense_2: 1
+  training:
+    lr: 0.1
+    task: teacher_data/256x256x1
+    test_split: 0.2
+    batch_size: 256
+    epochs: 5     # Epochs refers to the number of full passes through the training data
+    save_loss_frequency: "epoch"

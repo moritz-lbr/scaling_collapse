@@ -1,0 +1,17 @@
+defaults:
+  - master_config@_master
+  - _self_
+simulation_parameters:
+  network:
+    activations_per_layer:
+      Dense_0: relu
+      Dense_1: relu
+      Dense_2: identity
+    nodes_per_layer:
+      Dense_0: 1024
+      Dense_1: 1024
+      Dense_2: 1
+    param_scheme: muP
+    base_layer_widths: ${_master.simulation_parameters.network.base_layer_widths}
+  training: ${_master.simulation_parameters.training}  
+  
