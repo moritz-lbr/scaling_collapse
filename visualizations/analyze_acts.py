@@ -141,6 +141,7 @@ def plot_layer_activations(log_dir: Path, outfile: Path | None) -> None:
             (line,) = ax.loglog(
                 layer_widths,
                 layer_values,
+                base=2,
                 marker="o",
                 color=colors[layer_idx],
                 label=f"Hidden Layer {layer_idx + 1}",
