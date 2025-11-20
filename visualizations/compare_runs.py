@@ -16,7 +16,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.lines import Line2D
 
-from utils import extract_after_char, collect_files_with_ending
+from utils import extract_after_char, collect_files_with_ending, load_yaml_as_dict
 
 
 def load_training_log(log_path: Path) -> Dict[str, Any]:
@@ -74,7 +74,7 @@ def _build_combined_legend(
     return handles, labels, header_indices
 
 
-def plot_run(logs: Path, outfile: Path | None) -> None:
+def plot_run(logs: Path, outfile: Path, loss_type: str) -> None:
     log_files = sorted(collect_files_with_ending(logs, "training_log.json"))
     if not log_files:
         raise FileNotFoundError(f"No training logs found in {logs}")
@@ -100,29 +100,30 @@ def plot_run(logs: Path, outfile: Path | None) -> None:
     for log_path in log_files:
         log_data = load_training_log(log_path)
         history = log_data.get("history") or log_data.get("final_metrics", {}).get("history", {})
-        test_losses = history.get("test_loss", [])
-        if not test_losses:
+        losses = history.get(f"{loss_type}_loss")
+        if not losses:
             raise ValueError(f"No test loss history found in {log_path}")
         
-        dataset_info = log_data.get("dataset_info")
-        if isinstance(dataset_info.get("save_loss_frequency"), int):
-            save_loss_frequency = dataset_info.get("save_loss_frequency") 
-        else:
-            save_loss_frequency = 1  # Default to 1 if not specified or invalid
-        train_samples = np.array(range(1, len(test_losses) + 1)) * dataset_info.get("n_train")/save_loss_frequency
+        simluation_config_path = collect_files_with_ending(log_path.parent, "simulation_config.yaml")[0]
+        dataset_info = load_yaml_as_dict(simluation_config_path)["training"]
+        save_loss_frequency = dataset_info.get("save_loss_frequency")
+        if save_loss_frequency == "epoch":
+            save_loss_frequency = 1
+ 
+        train_samples = np.array(range(1, len(losses) + 1)) * dataset_info.get("training_data").get("n_train")/save_loss_frequency
         scheme = _scheme_from_path(log_path)
         color = color_map[scheme][color_indices[scheme]]
         color_indices[scheme] += 1
 
         label = extract_after_char(str(log_path), "-", "/")
 
-        line_loss, = ax_loss.plot(train_samples, test_losses, color=color, label=label)
-        ax_loss_log.plot(train_samples, test_losses, color=color, label=label)
+        line_loss, = ax_loss.plot(train_samples, losses, color=color, label=label)
+        ax_loss_log.plot(train_samples, losses, color=color, label=label)
 
         legend_entries[scheme].append((line_loss, label))
 
     ax_loss.set_xlabel("Training Samples", fontsize=20)
-    ax_loss.set_ylabel("Test Loss", fontsize=20)
+    ax_loss.set_ylabel(f"{loss_type.capitalize()} Loss", fontsize=20)
     ax_loss.grid(True, alpha=0.3)
     ax_loss.ticklabel_format(style='sci', axis='both', scilimits=(0, 0))
     ax_loss.xaxis.get_offset_text().set_fontsize(15)
@@ -135,7 +136,7 @@ def plot_run(logs: Path, outfile: Path | None) -> None:
     ax_loss_log.set_xscale("log")
     ax_loss_log.set_yscale("log")
     ax_loss_log.set_xlabel("Training Samples [log]", fontsize=20)
-    ax_loss_log.set_ylabel("Test Loss [log]", fontsize=20)
+    ax_loss_log.set_ylabel(f"{loss_type.capitalize()} Loss [log]", fontsize=20)
     ax_loss_log.grid(True, which="both", alpha=0.3)
     ax_loss_log.tick_params(axis='both', labelsize=14)
     # ax_loss_log.set_title("Loss vs. epoch [log-log]", fontsize=20)
@@ -189,10 +190,19 @@ def main() -> None:
         "--output",
         type=Path,
         help="Optional path to save the generated plot image.",
+        default=None
     )
 
+    parser.add_argument(
+        "--loss",
+        type=str,
+        help="Optional flag to plot the train loss. Usage: Add --loss train when running this program",
+        default="test"
+    )
+
+
     args = parser.parse_args()
-    plot_run(args.log_dir, args.output)
+    plot_run(args.log_dir, args.output, args.loss)
 
 
 if __name__ == "__main__":
