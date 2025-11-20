@@ -36,7 +36,8 @@ To run trainings for multiple networks simply provide the directory that contain
 ```
 pixi run python src/run_experiment.py --path experiments/mup  # To run the simulation using the pixi default environment
 ```
-The code will automatically search for all config files in the `configs/` subdirectory of the experiment and assemble the `config.yaml` files using the `master_config.yaml` file. All outputs will be saved in the experiments `log/` directory as for instance `experiments/mup/logs`. If this directory is not already present it will be created automatically. The output path of the logs can also be set manually from the CLI flag `--output_dir`.
+The code will automatically search for all config files in the `configs/` subdirectory of the experiment and assemble the `config.yaml` files using the `master_config.yaml` file. All outputs will be saved in the experiments `log/` directory as for instance `experiments/mup/logs`. If this directory is not already present it will be created automatically. Assembled config files using the`master_config.yaml` file and all other files contained in `configs/`, will look structurally like the `example_config.yaml` file that was already referneced in the [Quick Start](#quick-start) section.
+The output path of the logs can also be set manually from the CLI flag `--output_dir`.
 
 ### Configs 
 The config files specify all simulation settings that are used for training the networks. In principle every config file can provide completely independent simulation settings. Optionally, config settings that should be identical between different training processes of networks specified in the `configs/` directory, can be set using the `master_config.yaml` file and referenced in the distinct config files as in the example experiments `standard/` and `mup/`. 
