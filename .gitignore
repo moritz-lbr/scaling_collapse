@@ -3,10 +3,15 @@ __pycache__/
 .venv311/
 .cache
 experiments/*/logs
+experiments/*/archived_configs
+experiments/test/*
 datasets/teacher_data/*
+datasets/cifar-10-batches-py/
+datasets/summarize_dataset.py
 test/
 analyze_run.py
 scaling.py
 helper.py
 test.py
-scheme-standard_widths-256x256x1/
+.pixi/*
+todos.md
