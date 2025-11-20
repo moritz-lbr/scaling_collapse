@@ -10,8 +10,8 @@ simulation_parameters:
     nodes_per_layer:
       Dense_0: 256
       Dense_1: 256
-      Dense_2: 1
-    param_scheme: muP
+      Dense_2: 10
+    param_scheme: ${_master.simulation_parameters.network.param_scheme}
     base_layer_widths: ${_master.simulation_parameters.network.base_layer_widths}
   training: ${_master.simulation_parameters.training}  
   

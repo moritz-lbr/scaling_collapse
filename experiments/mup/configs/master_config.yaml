@@ -1,13 +1,15 @@
 simulation_parameters:
   network:
     base_layer_widths:
-      Dense_0: 64
-      Dense_1: 64
-      Dense_2: 1
+      Dense_0: 256
+      Dense_1: 256
+      Dense_2: 10
+    param_scheme: muP
   training:
-    lr: 0.1
-    task: teacher_data/256x256x1
+    lr: 0.01
+    task: /scratch/m/M.Rautenberg/projects/mup/datasets/teacher_data/256x256x1
     test_split: 0.2
-    batch_size: 256
-    epochs: 5     # Epochs refers to the number of full passes through the training data
-    save_loss_frequency: "epoch"
+    batch_size: 128
+    epochs: 1     # Epochs refers to the number of full passes through the training data
+    save_loss_frequency: epoch
+    loss_type: "mse"    #  Assign cross entropy loss via loss_type: "cross_entropy" 
