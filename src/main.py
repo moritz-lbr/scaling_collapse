@@ -16,15 +16,11 @@ def run_experiment(config_path: Path, output_dir: Path) -> None:
     cfg = create_config(sim_config)
 
     # Collect data from training configs and create config class
-    data_config_dir = Path("datasets").joinpath(cfg.task)
-    print(data_config_dir)
-    data_config_path = collect_files_with_ending(data_config_dir, "dataset_overview.yaml")[0]
+    data_config_path = collect_files_with_ending(cfg.task, "dataset_overview.yaml")[0]
     data_config = load_yaml_as_dict(data_config_path)["training"]
 
     widths = cfg.widths
-    # print(data_config["input_shape"], type(data_config["input_shape"]))
-    # Fix the issue with data_config["input_shape"]!!!
-    cfg.num_input_features, cfg.num_output_features = data_config["input_shape"][0], data_config["output_shape"][0]
+    cfg.num_input_features, cfg.num_output_features = data_config["input_dimension"], data_config["output_dimension"]
 
     run_name = f"scheme-{cfg.param_scheme}_widths-{format_widths(widths)}"
     run_dir = output_dir / run_name
@@ -44,49 +40,32 @@ def run_experiment(config_path: Path, output_dir: Path) -> None:
     finally:
         pbar.close()
 
-    dataset_info = result.get("dataset_info", {})
+    dataset_info = result.get("dataset_info")
+    dataset_info["input_dimension"] = cfg.num_input_features
+    dataset_info["output_dimension"] = cfg.num_output_features
+    dataset_info["task"] = cfg.task
     per_layer_counts, total_params = parameter_summary(result["final_params"])
     num_hidden_layers = len(widths)
-    num_layers_total = num_hidden_layers + 1
-
 
     # ----------------------------
     # Logs and Config_summary 
     # ----------------------------
 
     training_log = {
-        "dataset_info": {
-            "n_train": dataset_info.get("n_train"),
-            "n_test": dataset_info.get("n_test"),
-            "total": dataset_info.get("total"),
-            "test_split": dataset_info.get("test_split"),
-            "save_loss_frequency": dataset_info.get("save_loss_frequency"),
-        },
-        "parameter_summary": {
-            "num_hidden_layers": num_hidden_layers,
-            "num_layers_total": num_layers_total,
-            "nodes_per_layer": dict(_sorted_nodes(cfg.nodes_per_layer)),
-            "params_per_layer": per_layer_counts,
-            "total_params": int(total_params),
-        },
         "final_metrics": {
-            "train_loss": result["final_train_loss"],
-            "test_loss": result["final_test_loss"],
+            "final_train_loss": result["final_train_loss"],
+            "final_test_loss": result["final_test_loss"],
             "history": result["history"],
         },
         "final_params": tree_to_python(result["final_params"]),
     }
-
     
 
     with (run_dir / "training_log.json").open("w") as f:
         json.dump(training_log, f, indent=2)
 
-    
-
 
     network_section = OrderedDict([
-        ("num_layers_total", num_layers_total),
         ("num_hidden_layers", num_hidden_layers),
         ("activations_per_layer", cfg.activations_per_layer),
         ("nodes_per_layer", dict(_sorted_nodes(cfg.nodes_per_layer))),
@@ -97,12 +76,10 @@ def run_experiment(config_path: Path, output_dir: Path) -> None:
 
     training_section = OrderedDict([
         ("lr", cfg.lr),
-        ("task", cfg.task),
-        ("test_split", cfg.test_split),
-        ("batch_size", cfg.batch_size),
         ("epochs", cfg.epochs),
+        ("batch_size", cfg.batch_size),
         ("save_loss_frequency", cfg.save_loss_frequency),
-        ("training_data", data_config),
+        ("training_data", dataset_info),
     ])
 
     simulation_config = {
