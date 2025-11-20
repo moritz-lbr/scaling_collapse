@@ -17,6 +17,7 @@ class Config:
     task: str
     test_split: float
     save_loss_frequency: Any
+    loss_type: str
 
     @property
     def widths(self) -> Tuple[int, ...]:
@@ -123,6 +124,7 @@ def load_simulation_parameters(input) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     test_split = float(training_cfg.get("test_split"))
     save_loss_frequency = training_cfg.get("save_loss_frequency")
     base_layer_widths = network_cfg.get("base_layer_widths")
+    loss_type = training_cfg.get("loss_type")
 
     base_values: Dict[str, Any] = {
         "activations_per_layer": activations_map,
@@ -135,6 +137,7 @@ def load_simulation_parameters(input) -> Tuple[Dict[str, Any], Dict[str, Any]]:
         "task": task,
         "test_split": test_split,
         "save_loss_frequency": save_loss_frequency,
+        "loss_type": loss_type
     }
 
     return base_values, {"network": network_cfg, "training": training_cfg}
