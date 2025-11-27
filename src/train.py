@@ -53,7 +53,7 @@ def run_once(
 
     rng_source = np.random.default_rng()
 
-    if "teacher_data" in cfg.task:
+    if "teacher_data" in cfg.task or "regression_data" in cfg.task:
         inputs, targets = load_teacher_dataset(cfg.task)
         total_samples = int(inputs.shape[0])
         n_train, n_test = compute_split_counts(total_samples)
@@ -93,6 +93,7 @@ def run_once(
         cfg.activations,
         cfg.param_scheme,
         cfg.lr,
+        cfg.wd,
         sample_x,
         cfg.kernel_dimensions,
         nodes_per_layer=cfg.nodes_per_layer,
