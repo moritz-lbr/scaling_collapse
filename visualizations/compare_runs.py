@@ -74,8 +74,11 @@ def _build_combined_legend(
     return handles, labels, header_indices
 
 
-def plot_run(logs: Path, outfile: Path, loss_type: str) -> None:
-    log_files = sorted(collect_files_with_ending(logs, "training_log.json"))
+def plot_run(logs: Path, outfile: Path, loss_type: str, compute_flag: bool) -> None:
+    log_files = []
+    for run in logs:
+        files = collect_files_with_ending(run, "training_log.json")
+        log_files += files
     if not log_files:
         raise FileNotFoundError(f"No training logs found in {logs}")
 
@@ -105,24 +108,35 @@ def plot_run(logs: Path, outfile: Path, loss_type: str) -> None:
             raise ValueError(f"No test loss history found in {log_path}")
         
         simluation_config_path = collect_files_with_ending(log_path.parent, "simulation_config.yaml")[0]
-        dataset_info = load_yaml_as_dict(simluation_config_path)["training"]
+        simulation_info = load_yaml_as_dict(simluation_config_path)
+        dataset_info = simulation_info["training"]
+        network_info = simulation_info["network"]
         save_loss_frequency = dataset_info.get("save_loss_frequency")
+
         if save_loss_frequency == "epoch":
             save_loss_frequency = 1
- 
-        train_samples = np.array(range(1, len(losses) + 1)) * dataset_info.get("training_data").get("n_train")/save_loss_frequency
+
+        if compute_flag:
+            parameters = network_info.get("total_params")
+            batch_size = dataset_info.get("batch_size")
+            x_axis = np.array(range(1, len(losses) + 1)) * save_loss_frequency * batch_size * parameters
+            x_label = "Training Compute" 
+        else:
+            x_axis = np.array(range(1, len(losses) + 1)) * save_loss_frequency
+            x_label = "Training Steps" 
+
         scheme = _scheme_from_path(log_path)
         color = color_map[scheme][color_indices[scheme]]
         color_indices[scheme] += 1
 
         label = extract_after_char(str(log_path), "-", "/")
 
-        line_loss, = ax_loss.plot(train_samples, losses, color=color, label=label)
-        ax_loss_log.plot(train_samples, losses, color=color, label=label)
+        line_loss, = ax_loss.plot(x_axis, losses, color=color, label=label)
+        ax_loss_log.plot(x_axis, losses, color=color, label=label)
 
         legend_entries[scheme].append((line_loss, label))
 
-    ax_loss.set_xlabel("Training Samples", fontsize=20)
+    ax_loss.set_xlabel(f"{x_label}", fontsize=20)
     ax_loss.set_ylabel(f"{loss_type.capitalize()} Loss", fontsize=20)
     ax_loss.grid(True, alpha=0.3)
     ax_loss.ticklabel_format(style='sci', axis='both', scilimits=(0, 0))
@@ -135,7 +149,7 @@ def plot_run(logs: Path, outfile: Path, loss_type: str) -> None:
 
     ax_loss_log.set_xscale("log")
     ax_loss_log.set_yscale("log")
-    ax_loss_log.set_xlabel("Training Samples [log]", fontsize=20)
+    ax_loss_log.set_xlabel(f"{x_label} [log]", fontsize=20)
     ax_loss_log.set_ylabel(f"{loss_type.capitalize()} Loss [log]", fontsize=20)
     ax_loss_log.grid(True, which="both", alpha=0.3)
     ax_loss_log.tick_params(axis='both', labelsize=14)
@@ -168,6 +182,20 @@ def plot_run(logs: Path, outfile: Path, loss_type: str) -> None:
         legend._legend_box.align = "left"  # type: ignore[attr-defined]
         for index in header_indices:
             legend.get_texts()[index].set_fontweight("bold")
+        
+    
+    ax_loss.text(
+        0.02, 0.02,                     # (x, y) in Axes coordinates
+        f"lr = {dataset_info.get('lr')} \nepochs = {dataset_info.get('epochs')} \nbatch size = {dataset_info.get('batch_size')}",     # multiline text
+        transform=ax_loss.transAxes,        # anchor relative to axes
+        ha='left', va='bottom',           # align text box to corner
+        fontsize=15,
+        bbox=dict(
+            facecolor="white",
+            edgecolor="black",
+            boxstyle="round,pad=0.4"
+        )
+    )
 
     if outfile:
         outfile.mkdir(parents=True, exist_ok=True)
@@ -184,6 +212,7 @@ def main() -> None:
     parser.add_argument(
         "--log-dir",
         type=Path,
+        nargs="+",
         help="Path to a directory containing one or more training_log.json files.",
     )
     parser.add_argument(
@@ -196,13 +225,19 @@ def main() -> None:
     parser.add_argument(
         "--loss",
         type=str,
-        help="Optional flag to plot the train loss. Usage: Add --loss train when running this program",
-        default="test"
+        help="Optional flag to plot the test loss. Usage: Add --loss train when running this program",
+        default="train"
+    )
+
+    parser.add_argument(
+        "--compute",
+        action="store_true",
+        help="Optional flag to plot the test loss. Usage: Add --loss train when running this program"
     )
 
 
     args = parser.parse_args()
-    plot_run(args.log_dir, args.output, args.loss)
+    plot_run(args.log_dir, args.output, args.loss, args.compute)
 
 
 if __name__ == "__main__":
