@@ -15,6 +15,7 @@ simulation_parameters:
       Dense_2: 1
   training:
     lr: 0.001
+    wd: 0.01
     task: scheme-standard_widths-256x256x1
     test_split: 0.2
     batch_size: 256
