@@ -79,8 +79,9 @@ def make_teacher_data(cfg_path, output_file):
         },
         "training": {
             "data_samples": n_samples,
-            "input_shape": [in_dim],
-            "output_shape": [out_dim],
+            "input_dimension": in_dim,
+            "output_dimension": out_dim,
+            "noise_std": samp_cfg["noise_std"]
         },
     }
     with open(os.path.join(save_dir, "dataset_overview.yaml"), "w") as f:

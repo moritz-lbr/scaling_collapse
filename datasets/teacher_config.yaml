@@ -11,8 +11,8 @@ simulation_parameters:
   data:
     target: teacher
     teacher_data_dir: datasets/teacher_data
-    samples: 200000
-    input_dim: 32
+    samples: 50000
+    input_dim: 100
     output_dim: 1
     distribution: normal
-    noise_std: 0.0
+    noise_std: 0.5
