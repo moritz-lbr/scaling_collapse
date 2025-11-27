@@ -63,10 +63,6 @@ def tree_to_python(tree: Any) -> Any:
         return x
     return jax.tree_util.tree_map(convert, tree)
 
-
-def _sorted_nodes(nodes_map: Dict[str, int]) -> OrderedDict:
-    return OrderedDict(sorted(((k, int(v)) for k, v in nodes_map.items()), key=lambda kv: int(kv[0].split("_")[1])))
-
 # ----------------------------
 # Data
 # ----------------------------
@@ -196,17 +192,6 @@ def mse_loss(params, apply_fn, xb, yb, return_layer_act=False):
         preds = apply_fn({"params": params}, xb)
         return jnp.mean((preds - yb) ** 2)
     
-# def cross_entropy_loss(params, apply_fn, xb, yb, return_layer_act=False):
-#     if return_layer_act:
-#         preds, acts = apply_fn({"params": params}, xb, capture_layer_acts=True)
-#     else:
-#         preds = apply_fn({"params": params}, xb)
-
-#     if return_layer_act:
-#         return optax.ntxent(preds, yb, 0.0), jnp.mean(acts, axis=0)
-#     else: 
-#         return optax.ntxent(preds, yb, 0.0)
-    
 def cross_entropy_loss(params, apply_fn, xb, yb, return_layer_act=False):
     # x: (N, C), y: (N,)
     if return_layer_act:
@@ -218,7 +203,6 @@ def cross_entropy_loss(params, apply_fn, xb, yb, return_layer_act=False):
     rows = jnp.arange(preds.shape[0])
     loss = -(preds[rows, yb.astype(jnp.int32)] - log_sum_exp)
 
-    # print(type(jnp.mean(loss, axis=0)))
     if return_layer_act:
         return jnp.mean(loss, axis=0), jnp.mean(acts, axis=0)
     else: 
