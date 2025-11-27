@@ -13,5 +13,5 @@ analyze_run.py
 scaling.py
 helper.py
 test.py
-.pixi/*
+.pixi
 todos.md
