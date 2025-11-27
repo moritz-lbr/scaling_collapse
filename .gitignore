@@ -4,6 +4,9 @@ __pycache__/
 .cache
 experiments/*/logs
 experiments/*/archived_configs
+experiments/*/configs/*
+!experiments/*/configs/
+!experiments/*/configs/master_config.yaml
 experiments/test/*
 datasets/teacher_data/*
 datasets/cifar-10-batches-py/
