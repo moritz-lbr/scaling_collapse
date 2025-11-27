@@ -4,6 +4,9 @@ from collections import OrderedDict
 from pathlib import Path
 import yaml
 from tqdm import tqdm
+import pynvml
+# from jax import config
+# config.update("jax_enable_x64", True)
 
 from config import create_config, load_simulation_parameters
 from train import run_once
@@ -12,7 +15,7 @@ from utils import format_widths, parameter_summary, tree_to_python, _sorted_node
 
 def run_experiment(config_path: Path, output_dir: Path) -> None:
     # Load Config that 
-    sim_config, _ = load_simulation_parameters(config_path)
+    sim_config = load_simulation_parameters(config_path)
     cfg = create_config(sim_config)
 
     # Collect data from training configs and create config class
@@ -31,9 +34,8 @@ def run_experiment(config_path: Path, output_dir: Path) -> None:
     def update_progress(*, epoch: int, total: int, train_loss: float, test_loss: float) -> None:
         pbar.total = total
         pbar.n = epoch
-        pbar.set_postfix(train=f"{train_loss:.4f}", test=f"{test_loss:.4f}")
+        pbar.set_postfix(train=f"{train_loss:.4f}", test=f"{test_loss:.4f}", refresh=False)
         pbar.refresh()
-        tqdm.write(f"Epoch {epoch}/{total} • train_loss={train_loss:.6f} • test_loss={test_loss:.6f}")
 
     try:
         result = run_once(cfg, progress=update_progress)
@@ -76,6 +78,7 @@ def run_experiment(config_path: Path, output_dir: Path) -> None:
 
     training_section = OrderedDict([
         ("lr", cfg.lr),
+        ("wd", cfg.wd),
         ("epochs", cfg.epochs),
         ("batch_size", cfg.batch_size),
         ("save_loss_frequency", cfg.save_loss_frequency),
@@ -91,6 +94,19 @@ def run_experiment(config_path: Path, output_dir: Path) -> None:
         yaml.safe_dump(simulation_config, f, sort_keys=False)
 
     print(f"→ results saved to {run_dir}")
+
+    pynvml.nvmlInit()
+    handle = pynvml.nvmlDeviceGetHandleByIndex(0)
+
+    name = pynvml.nvmlDeviceGetName(handle)
+    mem = pynvml.nvmlDeviceGetMemoryInfo(handle)
+    cap = pynvml.nvmlDeviceGetCudaComputeCapability(handle)
+
+    print("Device name:", name)
+    print("Compute capability:", cap)
+    print("Total memory (GB):", mem.total / 1e9)
+    print("Free memory  (GB):", mem.free / 1e9)
+    print("Used memory  (GB):", mem.used / 1e9)
 
 
 def main() -> None:
