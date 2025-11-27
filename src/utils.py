@@ -195,8 +195,18 @@ def mse_loss(params, apply_fn, xb, yb, return_layer_act=False):
     else:
         preds = apply_fn({"params": params}, xb)
         return jnp.mean((preds - yb) ** 2)
+    
+# def cross_entropy_loss(params, apply_fn, xb, yb, return_layer_act=False):
+#     if return_layer_act:
+#         preds, acts = apply_fn({"params": params}, xb, capture_layer_acts=True)
+#     else:
+#         preds = apply_fn({"params": params}, xb)
 
-# def cross_entropy_loss(x, y, ignore_index=-100):
+#     if return_layer_act:
+#         return optax.ntxent(preds, yb, 0.0), jnp.mean(acts, axis=0)
+#     else: 
+#         return optax.ntxent(preds, yb, 0.0)
+    
 def cross_entropy_loss(params, apply_fn, xb, yb, return_layer_act=False):
     # x: (N, C), y: (N,)
     if return_layer_act:
@@ -235,8 +245,11 @@ def grad_norms_by_layer(grads):
 class TrainState(train_state.TrainState):
     lr_mults: Any  # pytree of LR multipliers (same structure as variables)
 
+def decay_mask(params):
+    # True where we want weight decay, False where we don't
+    return jax.tree_util.tree_map(lambda p: p.ndim > 1, params)
 
-def make_optimizer(base_lr: float, lr_mults_pytree):
+def make_optimizer(base_lr: float, wd: float, lr_mults_pytree):
     # A transform that multiplies grads by the LR multipliers
     def scale_by_lr_mults(lr_mults):
         def init_fn(_): return optax.EmptyState()
@@ -246,8 +259,9 @@ def make_optimizer(base_lr: float, lr_mults_pytree):
         return optax.GradientTransformation(init_fn, update_fn)
 
     tx = optax.chain(
+        optax.add_decayed_weights(wd, mask=decay_mask),
         scale_by_lr_mults(lr_mults_pytree),
-        optax.sgd(learning_rate=base_lr, momentum=0.0, nesterov=False),
+        optax.sgd(learning_rate=base_lr, momentum=None, nesterov=False),
     )
     return tx
 
@@ -268,6 +282,7 @@ def create_state(
     activations,
     param_scheme_name: str,
     lr: float,
+    wd: float,
     sample_x,
     kernel_dims,
     nodes_per_layer,
@@ -288,7 +303,7 @@ def create_state(
     variables = model.init(rng, sample_x)
     params = variables["params"]
     lr_mults_vars = scheme.lr_multiplier_pytree(kernel_dims)
-    tx = make_optimizer(lr, lr_mults_vars["params"])  # apply multipliers to param leaves
+    tx = make_optimizer(lr, wd, lr_mults_vars["params"])  # apply multipliers to param leaves
     state = TrainState(
         step=0,
         apply_fn=model.apply,
