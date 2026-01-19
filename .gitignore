@@ -4,9 +4,7 @@ __pycache__/
 .cache
 experiments/*/logs
 experiments/*/archived_configs
-experiments/*/configs/*
-!experiments/*/configs/
-!experiments/*/configs/master_config.yaml
+experiments/*/configs
 experiments/test/*
 datasets/teacher_data/*
 datasets/cifar-10-batches-py/
@@ -18,3 +16,5 @@ helper.py
 test.py
 .pixi
 todos.md
+figures_compare_runs/
+figures_normalize_runs/
