@@ -63,6 +63,14 @@ def tree_to_python(tree: Any) -> Any:
         return x
     return jax.tree_util.tree_map(convert, tree)
 
+def _sorted_nodes(nodes_map: Dict[str, int]) -> OrderedDict:
+    return OrderedDict(
+        sorted(
+            ((k, int(v)) for k, v in nodes_map.items()),
+            key=lambda kv: int(kv[0].split("_")[1])
+        )
+    )
+
 # ----------------------------
 # Data
 # ----------------------------
@@ -75,7 +83,7 @@ def collect_files_with_ending(directory: Path, ending: str) -> List[Path]:
                 matches.append(Path(root) / filename)
     return matches
 
-prefix = "/scratch/m/M.Rautenberg/projects/mup/datasets/"
+prefix = "/scratch/m/M.Rautenberg/projects/scaling_collapse/datasets/"
 
 Filenames = {'batch1': prefix + 'cifar-10-batches-py/data_batch_1',
              'batch2': prefix + 'cifar-10-batches-py/data_batch_2',
@@ -192,21 +200,32 @@ def mse_loss(params, apply_fn, xb, yb, return_layer_act=False):
         preds = apply_fn({"params": params}, xb)
         return jnp.mean((preds - yb) ** 2)
     
+# def cross_entropy_loss(params, apply_fn, xb, yb, return_layer_act=False):
+#     # x: (N, C), y: (N,)
+#     if return_layer_act:
+#         preds, acts = apply_fn({"params": params}, xb, capture_layer_acts=True)
+#     else:
+#         preds = apply_fn({"params": params}, xb)
+    
+#     log_sum_exp = jnp.log(jnp.sum(jnp.exp(preds), axis=1))
+#     rows = jnp.arange(preds.shape[0])
+#     loss = -(preds[rows, yb.astype(jnp.int32)] - log_sum_exp)
+
+#     if return_layer_act:
+#         return jnp.mean(loss, axis=0), jnp.mean(acts, axis=0)
+#     else: 
+#         return jnp.mean(loss, axis=0)
+
 def cross_entropy_loss(params, apply_fn, xb, yb, return_layer_act=False):
-    # x: (N, C), y: (N,)
     if return_layer_act:
         preds, acts = apply_fn({"params": params}, xb, capture_layer_acts=True)
+        labels_onehot = jax.nn.one_hot(yb, 10, dtype=jnp.float32)
+        return jnp.mean(optax.safe_softmax_cross_entropy(preds, labels=labels_onehot), axis=0), jnp.mean(acts, axis=0)
     else:
         preds = apply_fn({"params": params}, xb)
-    
-    log_sum_exp = jnp.log(jnp.sum(jnp.exp(preds), axis=1))
-    rows = jnp.arange(preds.shape[0])
-    loss = -(preds[rows, yb.astype(jnp.int32)] - log_sum_exp)
+        labels_onehot = jax.nn.one_hot(yb, 10, dtype=jnp.float32)
+        return jnp.mean(optax.safe_softmax_cross_entropy(preds, labels=labels_onehot), axis=0)
 
-    if return_layer_act:
-        return jnp.mean(loss, axis=0), jnp.mean(acts, axis=0)
-    else: 
-        return jnp.mean(loss, axis=0)
 
 # ----------------------------
 # Grad norms (optional instrumentation)
