@@ -1,5 +1,15 @@
 #!/usr/bin/env bash
+
+#!/bin/bash
+
+################ SLURM HEADER ################
+
+#SBATCH --output=/dev/null
+#SBATCH --error=/dev/null
+
 set -euo pipefail
+
+################ BASH SCRIPT #################
 
 # Pass the *experiment directory* that contains the "configs/" folder
 # Example: ./submit.sh /path/to/experiment

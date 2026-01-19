@@ -4,11 +4,14 @@
 #SBATCH --job-name=mup
 #SBATCH --mail-type=ALL,ARRAY_TASKS
 
-#SBATCH --mem=8G
-#SBATCH --time=00:10:00
+#SBATCH --mem=16G
+#SBATCH --time=12:00:00
 
-#SBATCH --partition=th-ws,cip,cip-ws     # or whichever partition you want
+#SBATCH --partition=cluster,th-ws,cip,cip-ws     # or whichever partition you want
 #SBATCH --gres=gpu:1           # at least one GPU
+
+#SBATCH --output=/dev/null
+#SBATCH --error=/dev/null
 
 set -euo pipefail
 
