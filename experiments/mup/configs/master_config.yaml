@@ -2,15 +2,18 @@ simulation_parameters:
   network:
     base_layer_widths:
       Dense_0: 128
-      Dense_1: 128
-      Dense_2: 10
+      Dense_1: 1
+    activations_per_layer:
+      Dense_0: relu
+      Dense_1: identity
     param_scheme: muP
   training:
-    lr: 0.001
-    wd: 0.01
-    task: /scratch/m/M.Rautenberg/projects/mup/datasets/cifar-10-batches-py
+    lr: 0.00001
+    wd: 0.0
+    task: /scratch/m/M.Rautenberg/projects/scaling_collapse/datasets/regression_data_06
     test_split: 0.2
     batch_size: 100
     epochs: 1000     # Epochs refers to the number of full passes through the training data
     save_loss_frequency: 100
-    loss_type: "cross_entropy"
+    weight_monitoring: True
+    loss_type: "mse"
