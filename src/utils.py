@@ -276,6 +276,7 @@ ACTS = {
     "tanh": jax.nn.tanh,
     "relu": jax.nn.relu,
     "gelu": jax.nn.gelu,
+    "sigmoid" : jax.nn.sigmoid
 }
 
 
