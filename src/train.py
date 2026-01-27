@@ -9,17 +9,20 @@ import optax
 from utils import mse_loss, cross_entropy_loss, create_state, load_teacher_dataset, load_all_cifar10_data, tree_to_python
 
 
-def make_train_step(loss_fn):
+def make_train_step(loss_fn, weight_monitoring):
     @jax.jit
     def train_step(state, xb, yb):
         grads = jax.grad(loss_fn)(state.params, state.apply_fn, xb, yb)
         updates, new_opt_state = state.tx.update(grads, state.opt_state, state.params)
         new_params = optax.apply_updates(state.params, updates)
-        return state.replace(params=new_params, opt_state=new_opt_state, step=state.step + 1), new_params
+        if weight_monitoring:
+            return state.replace(params=new_params, opt_state=new_opt_state, step=state.step + 1), new_params
+        else: 
+            return state.replace(params=new_params, opt_state=new_opt_state, step=state.step + 1), False
     return train_step
 
 def make_loss_saver(loss_fn):
-    def save_losses(history, state, xtr_full, ytr_full, xte_full, yte_full, epoch, total_epochs, progress, new_params=None):
+    def save_losses(history, state, xtr_full, ytr_full, xte_full, yte_full, epoch, total_epochs, progress, new_params):
         train_loss = loss_fn(state.params, state.apply_fn, xtr_full, ytr_full)
         test_loss, layer_activations = loss_fn(state.params, state.apply_fn, xte_full, yte_full, return_layer_act=True)
         
@@ -115,11 +118,10 @@ def run_once(
     else:
         raise ValueError("The loss type specified in the config could not be found")
     
-    train_step = make_train_step(loss_function)
+    train_step = make_train_step(loss_function, cfg.weight_monitoring)
     save_losses = make_loss_saver(loss_function)
 
     for epoch in range(cfg.epochs):
-        new_params = None  # track last params for this epoch
         indices = batch_rng.permutation(len(xtr_np))
         if batch_size >= len(xtr_np):
             print("Using full-batch training.")
