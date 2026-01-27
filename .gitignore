@@ -18,3 +18,8 @@ test.py
 todos.md
 figures_compare_runs/
 figures_normalize_runs/
+figures_pca/
+figures_weight_update_similarity/
+figures_weight_distributions/
+visualizations/kernel_pca.py
+visualizations/normalize_runs.py
