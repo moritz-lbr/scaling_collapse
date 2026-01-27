@@ -12,6 +12,8 @@ repo_root = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(repo_root))
 sys.path.insert(0, str(repo_root) + "/src")
 
+import matplotlib
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.lines import Line2D
@@ -75,12 +77,17 @@ def _build_combined_legend(
 
 
 def plot_run(logs: Path, outfile: Path, loss_type: str, compute_flag: bool) -> None:
-    log_files = []
+    log_paths = []
     for run in logs:
         files = collect_files_with_ending(run, "training_log.json")
-        log_files += files
-    if not log_files:
+        log_paths += files
+    if not log_paths:
         raise FileNotFoundError(f"No training logs found in {logs}")
+    
+    log_files = sorted(
+        log_paths,
+        key=lambda p: int(re.search(r'widths-(\d+)x', str(p)).group(1))
+        )
 
     scheme_groups = {
         "standard": [log for log in log_files if _scheme_from_path(log) == "standard"],
@@ -165,7 +172,7 @@ def plot_run(logs: Path, outfile: Path, loss_type: str, compute_flag: bool) -> N
         legend_entries, legend_titles
     )
 
-    fig.suptitle("Runs")
+    fig.suptitle("Runs", fontsize=20)
     fig.tight_layout(rect=[0, 0.15, 1, 0.97])
 
     if combined_handles:
@@ -184,8 +191,8 @@ def plot_run(logs: Path, outfile: Path, loss_type: str, compute_flag: bool) -> N
             legend.get_texts()[index].set_fontweight("bold")
         
     
-    ax_loss.text(
-        0.02, 0.02,                     # (x, y) in Axes coordinates
+    ax_loss_log.text(
+        1.25, 0.1,                     # (x, y) in Axes coordinates
         f"lr = {dataset_info.get('lr')} \nepochs = {dataset_info.get('epochs')} \nbatch size = {dataset_info.get('batch_size')}",     # multiline text
         transform=ax_loss.transAxes,        # anchor relative to axes
         ha='left', va='bottom',           # align text box to corner
@@ -196,13 +203,19 @@ def plot_run(logs: Path, outfile: Path, loss_type: str, compute_flag: bool) -> N
             boxstyle="round,pad=0.4"
         )
     )
-
+    
+    prefix = "figures_compare_runs/"
     if outfile:
-        outfile.mkdir(parents=True, exist_ok=True)
-        fig.savefig(outfile, bbox_inches="tight")
-        print(f"Saved plot to {outfile}")
+        file_path = prefix + outfile
     else:
-        plt.show()
+        file_path = prefix + str(logs[0].name)
+
+    if compute_flag:
+        file_path = file_path + "_c"
+
+    Path(prefix).mkdir(parents=True, exist_ok=True)
+    fig.savefig(file_path, bbox_inches="tight")
+    print(f"Saved plot to {file_path}")
 
 
 def main() -> None:
