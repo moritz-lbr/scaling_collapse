@@ -1,0 +1,13 @@
+simulation_parameters:
+  data:
+    regression_data_dir: datasets/regression_data
+    samples: 5000
+    input_dim: 8
+    output_dim: 1
+    num_terms: 8
+    power_law_exponent: -2.0
+    non_linearity: "x**3"
+    noise_std: False
+    bias: False
+    seed: False
+
