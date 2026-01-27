@@ -18,6 +18,7 @@ class Config:
     task: str
     test_split: float
     save_loss_frequency: Any
+    weight_monitoring: bool
     loss_type: str
 
     @property
