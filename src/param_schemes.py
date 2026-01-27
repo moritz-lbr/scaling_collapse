@@ -144,26 +144,10 @@ STANDARD = ParamScheme(
 )
 
 
-# MUP = ParamScheme(
-#     name="muP",
-#     input_layer = [-0.5, 0.5, 0.0],
-#     output_layer = [0.5, 0.5, 0.0],
-#     hidden_layer = [0.0, 0.5, 0.0],
-#     n_var = {"in": "fan_out", 
-#              "out": "fan_in", 
-#              "hidden": "fan_in"},
-#     n_mult = {"in": "fan_out", 
-#               "out": "fan_in", 
-#               "hidden": "one"},
-#     n_lr = {"in": "fan_out", 
-#              "out": "fan_in", 
-#              "hidden": "one"}
-# )
-
 MUP = ParamScheme(
     name="muP",
     input_layer = [0.0, 0.5, -1.0],
-    output_layer = [0.0, 0.5, 1.0],
+    output_layer = [0.0, 1.0, 1.0],
     hidden_layer = [0.0, 0.5, 0.0],
     n_var = {"in": "fan_in", 
              "out": "fan_in", 
@@ -175,6 +159,22 @@ MUP = ParamScheme(
              "out": "fan_in", 
              "hidden": "one"}
 )
+
+# MUP = ParamScheme(
+#     name="muP",
+#     input_layer = [0.0, 0.5, -1.0],
+#     output_layer = [0.0, 0.5, 1.0],
+#     hidden_layer = [0.0, 0.5, 0.0],
+#     n_var = {"in": "fan_in", 
+#              "out": "fan_in", 
+#              "hidden": "fan_in"},
+#     n_mult = {"in": "one", 
+#               "out": "one", 
+#               "hidden": "one"},
+#     n_lr = {"in": "fan_out", 
+#              "out": "fan_in", 
+#              "hidden": "one"}
+# )
 
 
 SCHEMES = {
