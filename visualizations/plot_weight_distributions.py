@@ -190,7 +190,7 @@ def main() -> None:
     parser.add_argument(
         "--output-dir",
         type=Path,
-        default=Path("weight_distributions"),
+        default=Path("figures_weight_distributions"),
         help="Directory to save the generated histogram images.",
     )
     parser.add_argument(
