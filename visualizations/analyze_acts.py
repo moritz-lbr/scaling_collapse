@@ -8,6 +8,14 @@ import os
 import re
 from pathlib import Path
 from typing import Dict, List, Sequence
+import sys
+repo_root = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(repo_root))
+sys.path.insert(0, str(repo_root) + "/src")
+from utils import load_yaml_as_dict
+
+import matplotlib
+matplotlib.use("Agg")
 
 _CACHE_DIR = Path(".cache/matplotlib")
 os.environ.setdefault("MPLCONFIGDIR", str(_CACHE_DIR.resolve()))
@@ -83,6 +91,12 @@ def plot_layer_activations(log_dir: Path, outfile: Path | None) -> None:
     histories = _gather_activation_histories(log_dir)
     if not histories:
         raise ValueError(f"No activation histories available in {log_dir}")
+    
+    simluation_config_path = collect_files_with_ending(log_dir.parent, "simulation_config.yaml")[0]
+    simulation_info = load_yaml_as_dict(simluation_config_path)
+    dataset_info = simulation_info["training"]
+    network_info = simulation_info["network"]
+    save_loss_frequency = dataset_info.get("save_loss_frequency")
 
     epoch_counts = {width: history.shape[0] for width, history in histories.items()}
     min_epochs = min(epoch_counts.values())
@@ -106,7 +120,7 @@ def plot_layer_activations(log_dir: Path, outfile: Path | None) -> None:
             )
         parsed_widths.append(widths)
 
-    hidden_count = num_layers - 1
+    hidden_count = num_layers
     if hidden_count <= 0:
         raise ValueError("Layer activation history does not include hidden layers to plot.")
 
@@ -120,7 +134,7 @@ def plot_layer_activations(log_dir: Path, outfile: Path | None) -> None:
             f"Note: {min_epochs} epochs available; plotting the first {num_epochs} epochs."
         )
 
-    fig, axes = plt.subplots(2, 5, figsize=(18, 7), sharey=True)
+    fig, axes = plt.subplots(2, 5, figsize=(20, 7))
     axes_flat = axes.flatten()
     colors = plt.cm.viridis(np.linspace(0, 1, hidden_count))
     unique_width_values = sorted(
@@ -136,9 +150,9 @@ def plot_layer_activations(log_dir: Path, outfile: Path | None) -> None:
             continue
 
         for layer_idx in range(hidden_count):
-            layer_widths = [widths[layer_idx] for widths in parsed_widths]
+            layer_widths = [widths[0] for widths in parsed_widths]
             layer_values = [history[epoch_idx, layer_idx] for _, history in width_items]
-            (line,) = ax.loglog(
+            (line,) = ax.semilogx(
                 layer_widths,
                 layer_values,
                 base=2,
@@ -148,29 +162,35 @@ def plot_layer_activations(log_dir: Path, outfile: Path | None) -> None:
             )
             if epoch_idx == 0 and layer_idx < len(colors):
                 legend_handles.append(line)
-                legend_labels.append(f"Hidden Layer {layer_idx + 1}")
+                legend_labels.append(f"Dense Layer {layer_idx}")
 
-        ax.set_title(f"Epoch {epoch_idx + 1}")
+        ax.set_title(f"Optimization Step {(epoch_idx + 1)*save_loss_frequency}", fontsize=15)
         if epoch_idx >= 5:
-            ax.set_xlabel("Layer Width")
+            ax.set_xlabel(r"Hidden Layer Width $[log_2]$", fontsize=15)
         if epoch_idx % 5 == 0:
-            ax.set_ylabel("Average Activation")
-        ax.set_xticks(unique_width_values)
-        ax.set_xticklabels([str(value) for value in unique_width_values])
+            ax.set_ylabel("Logit Norms", fontsize=15)
+        ax.set_xticks(layer_widths)
+        ax.set_xticklabels([str(value) for value in layer_widths])
+    
+        ax.tick_params(axis="y", which="both", labelleft=True)
         ax.grid(True, alpha=0.3)
 
     if legend_handles:
-        fig.legend(legend_handles, legend_labels, loc="lower center", ncol=len(legend_labels), frameon=False)
+        fig.legend(legend_handles, legend_labels, loc="lower center", ncol=len(legend_labels), frameon=False, fontsize=15)
 
-    fig.suptitle("Average Hidden Layer Activations vs. Width (per Epoch)")
+    fig.suptitle(f"Logit Norms for each Network Layer vs. Network Width in the Hidden Layers (Shown for Multiple Optimization Steps)", fontsize=15)
     fig.tight_layout(rect=[0, 0.08, 1, 0.95])
 
+    prefix = "figures_analyze_acts/"
     if outfile:
-        outfile.parent.mkdir(parents=True, exist_ok=True)
-        fig.savefig(outfile, bbox_inches="tight")
-        print(f"Saved activation plot to {outfile}")
+        file_path = prefix + outfile
     else:
-        plt.show()
+        file_path = prefix + str(log_dir.name)
+
+
+    Path(prefix).mkdir(parents=True, exist_ok=True)
+    fig.savefig(file_path, bbox_inches="tight")
+    print(f"Saved plot to {file_path}")
 
 
 def main() -> None:
