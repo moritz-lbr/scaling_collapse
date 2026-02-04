@@ -4,10 +4,10 @@
 #SBATCH --job-name=mup
 #SBATCH --mail-type=ALL,ARRAY_TASKS
 
-#SBATCH --mem=16G
+#SBATCH --mem=128G
 #SBATCH --time=12:00:00
 
-#SBATCH --partition=cluster,th-ws,cip,cip-ws     # or whichever partition you want
+#SBATCH --partition=inter,cluster,th-ws,cip,cip-ws     # or whichever partition you want
 #SBATCH --gres=gpu:1           # at least one GPU
 
 #SBATCH --output=/dev/null
@@ -19,8 +19,8 @@ set -euo pipefail
 
 # --- Paths you control -------------------------------------------------------
 SLURMSCRIPTDIR=$(pwd)
-SOURCEDIR="${SLURMSCRIPTDIR}/src"              # your source tree (contains main.py)
-PROGRAM="run_experiment.py"                   # your Python entrypoint
+SOURCEDIR="${SLURMSCRIPTDIR}"              # your source tree (contains main.py)
+PROGRAM="src/run_experiment.py"                   # your Python entrypoint
 
 # CONFIG_DIR is passed in from submit.sh and must contain a "configs/" folder.
 : "${CONFIG_DIR:?CONFIG_DIR must be provided via submit.sh}"
