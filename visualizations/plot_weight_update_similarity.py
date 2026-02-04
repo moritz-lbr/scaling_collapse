@@ -90,7 +90,7 @@ def _build_combined_legend(
     return handles, labels, header_indices
 
 
-def _flatten_weights(entry: Any) -> np.ndarray:
+def _flatten_weights(entry: Any, layer: str) -> np.ndarray:
     arrays: List[np.ndarray] = []
 
     def traverse(node: Any) -> None:
@@ -98,10 +98,17 @@ def _flatten_weights(entry: Any) -> np.ndarray:
             for key in sorted(node):
                 traverse(node[key])
             return
+        
+        # arr = np.asarray(node[layer]["kernel"], dtype=float)
         arr = np.asarray(node, dtype=float)
         arrays.append(arr.ravel())
 
-    traverse(entry)
+    if layer == "all_weights":
+        traverse(entry)
+    else:
+        arr = np.asarray(entry[layer]["kernel"], dtype=float)
+        arrays.append(arr.ravel())
+
     if not arrays:
         return np.array([], dtype=float)
     return np.concatenate(arrays)
@@ -112,11 +119,10 @@ def _extract_weights(history_blob: Dict[str, Any]) -> List[Any]:
     weights = history.get("weights")
     return weights if isinstance(weights, list) else []
 
-def compute_deltas(weight_history: List[Any]):
-    if len(weight_history) < 3:
-        return np.array([])
-
-    flattened = [_flatten_weights(snapshot) for snapshot in weight_history]
+def compute_deltas(weight_history: List[Any], layer: str):
+    flattened = [_flatten_weights(snapshot, layer) for snapshot in weight_history]
+    # flattened = [np.asarray(snapshot[layer]["kernel"], dtype=float).ravel() for snapshot in weight_history]
+    # flattened = [_flatten_weights(snapshot) for snapshot in weight_history]
     lengths = {vec.shape[0] for vec in flattened}
     if len(lengths) != 1:
         raise ValueError("Weight snapshots do not all have the same size.")
@@ -126,9 +132,9 @@ def compute_deltas(weight_history: List[Any]):
 
 def _cumulative_and_actual_path_length(deltas: List[Any], initial_weights: np.ndarray, final_weights: np.ndarray) -> Tuple[float, float, float]:
     step_norms: List = []
-    for i in range(1, len(deltas)):
+    for i in range(0, len(deltas)):
         step_norms.append(np.linalg.norm(deltas[i]))
-    np.array(step_norms)
+    step_norms = np.array(step_norms)
     cum_path_length = np.sum(step_norms)
     delta_T = np.linalg.norm(final_weights - initial_weights)
     theta_0 = np.linalg.norm(initial_weights)
@@ -139,14 +145,14 @@ def _cumulative_and_actual_path_length(deltas: List[Any], initial_weights: np.nd
 
 def _cosine_similarity(deltas: List[Any]) -> np.ndarray:
     sims: List[float] = []
-    for i in range(1, len(deltas)):
+    for i in range(0, len(deltas)):
         a, b = deltas[i], deltas[i - 1]
         denom = float(np.linalg.norm(a) * np.linalg.norm(b))
         sims.append(float(np.dot(a, b) / denom) if denom > 0 else np.nan)
     return np.array(sims)
 
 
-def plot_weight_update_similarity(job_dir: Path, outfile: Path | None) -> None:
+def plot_weight_update_similarity(job_dir: Path, outfile: Path | None, layer: str, compute_flag: bool) -> None:
     log_paths = collect_files_with_ending(job_dir, "training_log.json")
     if not log_paths:
         raise FileNotFoundError(f"No training logs found in {job_dir}")
@@ -171,29 +177,40 @@ def plot_weight_update_similarity(job_dir: Path, outfile: Path | None) -> None:
 
     legend_entries: Dict[str, List[Tuple[Any, str]]] = {"standard": [], "muP": []}
 
-    fig, ((ax_log, ax), (ax_step_norms, ax_path_lengths)) = plt.subplots(2,2, figsize=(15, 10))
+    fig, ((cos_log, loss_log), (ax_step_norms, ax_path_lengths)) = plt.subplots(2,2, figsize=(15, 10))
+
+    step_norms_list = []
 
     print("Number of Nodes |", "Cumulated Path Length |", "Normalized Distance |", "Relative Distance |", "Overlap")
     for log_path in log_paths:
         simluation_config_path = collect_files_with_ending(log_path.parent, "simulation_config.yaml")[0]
         simulation_info = load_yaml_as_dict(simluation_config_path)
-        dataset_info = simulation_info["training"]
-        num_nodes = simulation_info["network"]["nodes_per_layer"]["Dense_0"]
+        
+        dataset_info = simulation_info.get("training")
+        network_info = simulation_info.get("network")
+        
+        num_nodes = network_info.get("nodes_per_layer").get("Dense_0")
         node_list.append(num_nodes)
+
+        task_path = dataset_info.get("training_data").get("task")
+        task_name = Path(task_path).name
+
         save_loss_frequency = dataset_info.get("save_loss_frequency")
 
         log_data = load_training_log(log_path)
-        weights_history = _extract_weights(log_data) or _extract_weights(
-            log_data.get("final_metrics", {})
-        )
-        if not weights_history:
-            print(f"Skipping {log_path}: no weights found.")
-            continue
+        history = log_data.get("final_metrics").get("history")
+        losses = history.get("train_loss")
+        weights_history = _extract_weights(history)
+        if not losses:
+            raise ValueError(f"No loss history found in {log_path}")
 
-        deltas, initial_weights, final_weights = compute_deltas(weights_history)
+        deltas, initial_weights, final_weights = compute_deltas(weights_history, layer)
         similarities = _cosine_similarity(deltas)
         step_norms, cum_path_length, normalized_distance, relative_distance, overlap = _cumulative_and_actual_path_length(deltas, initial_weights, final_weights)
+        step_norms_list.append(step_norms)
+
         print(f"{num_nodes} |", f"{cum_path_length} |", f"{normalized_distance} |", f"{relative_distance} |", overlap)
+        
         if similarities.size == 0:
             print(f"Skipping {log_path}: need at least three weight snapshots.")
             continue
@@ -203,33 +220,48 @@ def plot_weight_update_similarity(job_dir: Path, outfile: Path | None) -> None:
         color_indices[scheme] += 1
 
         label = extract_after_char(str(log_path), "-", "/")
-        x_axis = np.arange(2, len(weights_history), dtype=int) * save_loss_frequency
 
-        line, = ax.plot(x_axis, similarities, color=color, label=label)
-        legend_entries[scheme].append((line, label))
-        ax_log.loglog(x_axis, similarities, color=color)
-        ax_step_norms.plot(x_axis, step_norms, color=color)
+        if save_loss_frequency == "epoch":
+            save_loss_frequency = 1
+
+        if compute_flag:
+            parameters = network_info.get("total_params")
+            batch_size = dataset_info.get("batch_size")
+            x_axis = np.array(range(1, len(losses) + 1)) * save_loss_frequency * batch_size * parameters
+            x_label = "Training Compute" 
+        else:
+            x_axis = np.array(range(1, len(losses) + 1)) * save_loss_frequency
+            x_label = "Training Steps" 
+
+        line, = loss_log.plot(x_axis, losses, color=color)
+        cos_log.plot(x_axis[:-1], similarities, color=color, label=label)
+        ax_step_norms.plot(x_axis[:-1], step_norms, color=color)
         ax_path_lengths.plot(num_nodes, cum_path_length, color=color, marker="o")
-        ax_path_lengths.plot(num_nodes, normalized_distance, color=color, marker="D")
-        ax_path_lengths.plot(num_nodes, overlap, color=color, marker="x")
+        # ax_path_lengths.plot(num_nodes, normalized_distance, color=color, marker="D")
+        # ax_path_lengths.plot(num_nodes, overlap, color=color, marker="x")
+
+        legend_entries[scheme].append((line, label))
 
     ax_path_lengths.plot(num_nodes, cum_path_length, label=r"Cumulative Path Length: $F(T) = \sum_{t_{i}=1}^{T} \| \vec{\theta}_{t_{i+1}} - \vec{\theta}_{t_{i}} \|$", color=color, marker="o")
-    ax_path_lengths.plot(num_nodes, normalized_distance, label=r"Normalized Distance: $\frac{\| \vec{\theta}_{T} - \vec{\theta}_{t_{0}} \|}{\| \vec{\theta}_{t_{0}} \|}$", color=color, marker="D")
-    ax_path_lengths.plot(num_nodes, overlap, color=color, label=r"Overlap: $\frac{\sqrt{\langle \vec{\theta}_{T}, \vec{\theta}_{t_{0}} \rangle}}{\| \vec{\theta}_{t_{0}} \|}$", marker="x")
+    # ax_path_lengths.plot(num_nodes, normalized_distance, label=r"Normalized Distance: $\frac{\| \vec{\theta}_{T} - \vec{\theta}_{t_{0}} \|}{\| \vec{\theta}_{t_{0}} \|}$", color=color, marker="D")
+    # ax_path_lengths.plot(num_nodes, overlap, color=color, label=r"Overlap: $\frac{\sqrt{\langle \vec{\theta}_{T}, \vec{\theta}_{t_{0}} \rangle}}{\| \vec{\theta}_{t_{0}} \|}$", marker="x")
     path_lengths_legend = ax_path_lengths.legend(fontsize=13)
     for h in path_lengths_legend.legend_handles:
         h.set_color("black")
         h.set_markerfacecolor("black")
 
-    ax.set_xlabel(r"Training Steps $t_{i}$", fontsize=16)
-    ax.set_ylabel(r"$\cos(\Delta \vec{\theta}_{t_{i+1}}, \Delta \vec{\theta}_{t_{i}})$", fontsize=16)
-    ax.grid(True, alpha=0.3)
-    ax.tick_params(axis="both", labelsize=13)
+    loss_log.set_xscale("log")
+    loss_log.set_yscale("log")
+    loss_log.set_xlabel(f"{x_label} [log]", fontsize=16)
+    loss_log.set_ylabel(f"Training Loss [log]", fontsize=16)
+    loss_log.grid(True, which="both", alpha=0.3)
+    loss_log.tick_params(axis='both', labelsize=13)
 
-    ax_log.set_xlabel(r"Training Steps $t_{i}$ [log]", fontsize=16)
-    ax_log.set_ylabel(r"$\cos(\Delta \vec{\theta}_{t_{i+1}}, \Delta \vec{\theta}_{t_{i}})$ [log]", fontsize=16)
-    ax_log.grid(True, alpha=0.3)
-    ax_log.tick_params(axis="both", labelsize=13)
+    cos_log.set_xlabel(r"Training Steps $t_{i}$ [log]", fontsize=16)
+    cos_log.set_ylabel(r"$\cos(\Delta \vec{\theta}_{t_{i+1}}, \Delta \vec{\theta}_{t_{i}})$", fontsize=16)
+    cos_log.grid(True, alpha=0.3)
+    cos_log.set_xscale("log", base=10)
+    cos_log.tick_params(axis="both", labelsize=13)
 
     ax_step_norms.set_xlabel(r"Training Steps $t_{i}$ [log]", fontsize=16)
     ax_step_norms.set_ylabel(r"$\| \Delta \vec{\theta}_{t_{i}} \| = \| \vec{\theta}_{t_{i+1}} - \vec{\theta}_{t_{i}}\|$", fontsize=16)
@@ -238,7 +270,7 @@ def plot_weight_update_similarity(job_dir: Path, outfile: Path | None) -> None:
     ax_step_norms.tick_params(axis="both", labelsize=13)
 
     ax_path_lengths.set_xlabel(r"Network Size $[log_{2}]$", fontsize=16)
-    ax_path_lengths.set_ylabel("", fontsize=16)
+    ax_path_lengths.set_ylabel(r"$F(T)$", fontsize=16)
     ax_path_lengths.grid(True, alpha=0.3)
     ax_path_lengths.set_xticks(node_list)
     ax_path_lengths.set_xticklabels([str(value) for value in node_list])
@@ -267,15 +299,28 @@ def plot_weight_update_similarity(job_dir: Path, outfile: Path | None) -> None:
         for index in header_indices:
             legend.get_texts()[index].set_fontweight("bold")
 
+    loss_log.text(
+        0.1, 0.1,                     # (x, y) in Axes coordinates
+        f"lr = {dataset_info.get('lr')} \nepochs = {dataset_info.get('epochs')} \nbatch size = {dataset_info.get('batch_size')}",     # multiline text
+        transform=loss_log.transAxes,        # anchor relative to axes
+        ha='left', va='bottom',           # align text box to corner
+        fontsize=15,
+        bbox=dict(
+            facecolor="white",
+            edgecolor="black",
+            boxstyle="round,pad=0.4"
+        )
+    )
+
     fig.suptitle(r"$\vec{\theta}_{t}$ Describes the Networks Whole Weight Vector" + f"\n {save_loss_frequency} SGD Update Steps Between Subsequent Data Points" + r" $t_{i+1}$ and $t_{i}$", fontsize=18)
     fig.tight_layout(rect=[0, 0.02, 1, 0.95])
 
-    prefix = Path("figures_weight_update_similarity")
+    prefix = Path(f"figures_weight_update_similarity/{task_name}/{job_dir.name}")
     prefix.mkdir(parents=True, exist_ok=True)
     if outfile:
         file_path = prefix / outfile
     else:
-        file_path = prefix / f"{job_dir.name}_weight_update_cosine.png"
+        file_path = prefix / f"weight_metrics_{layer}.png"
     if file_path.suffix == "":
         file_path = file_path.with_suffix(".png")
     fig.savefig(file_path, bbox_inches="tight")
@@ -298,8 +343,20 @@ def main() -> None:
         help="Optional filename to save the plot under figures_weight_update_similarity/.",
         default=None,
     )
+    parser.add_argument(
+        "--layer",
+        type=str,
+        default="all_weights",
+        help="Optional flag to plot the weight metrics only for the specified layer of the network. Each network layer can be adressed as: 'Dense_0' ... 'Dense_N'"
+    )
+    parser.add_argument(
+        "--compute",
+        action="store_true",
+        help="Optional flag to plot the amount of compute [FLOPS] on the x-axis corresponding to the weight metric or loss at each training step."
+    )
+
     args = parser.parse_args()
-    plot_weight_update_similarity(args.log_dir, args.output)
+    plot_weight_update_similarity(args.log_dir, args.output, args.layer, args.compute)
 
 
 if __name__ == "__main__":
