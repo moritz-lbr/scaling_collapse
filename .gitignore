@@ -16,6 +16,7 @@ helper.py
 test.py
 .pixi
 todos.md
+figures_analyze_acts/
 figures_compare_runs/
 figures_normalize_runs/
 figures_pca/
