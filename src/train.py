@@ -1,48 +1,76 @@
 # train.py
 from typing import Dict, Any, Callable, Optional
+from pathlib import Path
 
 import numpy as np
 import jax
 import jax.numpy as jnp
 import optax
+from flax.traverse_util import flatten_dict
+import zarr
 
-from utils import mse_loss, cross_entropy_loss, create_state, load_teacher_dataset, load_all_cifar10_data, tree_to_python
+from utils import mse_loss, cross_entropy_loss, create_state, load_teacher_dataset, load_all_cifar10_data
 
 
-def make_train_step(loss_fn, weight_monitoring):
+def make_train_step(loss_fn):
     @jax.jit
     def train_step(state, xb, yb):
         grads = jax.grad(loss_fn)(state.params, state.apply_fn, xb, yb)
         updates, new_opt_state = state.tx.update(grads, state.opt_state, state.params)
         new_params = optax.apply_updates(state.params, updates)
-        if weight_monitoring:
-            return state.replace(params=new_params, opt_state=new_opt_state, step=state.step + 1), new_params
-        else: 
-            return state.replace(params=new_params, opt_state=new_opt_state, step=state.step + 1), False
+        return state.replace(params=new_params, opt_state=new_opt_state, step=state.step + 1)
     return train_step
 
 def make_loss_saver(loss_fn):
-    def save_losses(history, state, xtr_full, ytr_full, xte_full, yte_full, epoch, total_epochs, progress, new_params):
+    def save_losses(history, state, xtr_full, ytr_full, xte_full, yte_full, train_step, total_train_steps, progress=None):
         train_loss = loss_fn(state.params, state.apply_fn, xtr_full, ytr_full)
         test_loss, layer_activations = loss_fn(state.params, state.apply_fn, xte_full, yte_full, return_layer_act=True)
         
         history["train_loss"].append(float(train_loss))
         history["test_loss"].append(float(test_loss))
         history["layer_activations"].append(layer_activations.tolist())
-        if new_params:
-            history["weights"].append(tree_to_python(new_params))
+
         if progress is not None:
             progress(
-                epoch=epoch + 1,
-                total=total_epochs,
+                epoch=int(train_step),
+                total=int(total_train_steps),
                 train_loss=float(train_loss),
                 test_loss=float(test_loss),
             )
     return save_losses
 
+def init_weight_store(zarr_path, params, total_steps, sep="/", dtype=None, time_chunk=64):
+    root = zarr.open_group(zarr_path, mode="w")
+    flat = flatten_dict(params, sep=sep)
+
+    root.attrs["total_steps"] = int(total_steps)
+    root.attrs["param_keys"] = list(flat.keys())
+
+    for k, v in flat.items():
+        v0 = np.array(jax.device_get(v))
+        dt = dtype if dtype is not None else v0.dtype
+
+        root.create_dataset(
+            name=k,
+            shape=(total_steps,) + v0.shape,
+            chunks=(min(time_chunk, total_steps),) + v0.shape,  # chunk along time
+            dtype=dt,
+        )
+    return root
+
+def append_params(root, params, step, sep="/", cast_dtype=None):
+    flat = flatten_dict(params, sep=sep)
+
+    for k, v in flat.items():
+        arr = np.array(jax.device_get(v))
+        if cast_dtype is not None:
+            arr = arr.astype(cast_dtype)
+        root[k][int(step), ...] = arr
+
 
 def run_once(
     cfg,
+    run_dir: Path,
     progress: Optional[Callable[..., None]] = None,
 ) -> Dict[str, Any]:
     
@@ -106,8 +134,7 @@ def run_once(
         base_kernel_dims=cfg.base_kernel_dimensions
     )
 
-    history = {"train_loss": [], "test_loss": [], "layer_activations": [], "weights": []}
-    total_epochs = cfg.epochs
+    history = {"train_loss": [], "test_loss": [], "layer_activations": []}
     batch_rng = rng_source
     batch_size = cfg.batch_size if cfg.batch_size and cfg.batch_size > 0 else len(xtr_np)
 
@@ -118,38 +145,60 @@ def run_once(
     else:
         raise ValueError("The loss type specified in the config could not be found")
     
-    train_step = make_train_step(loss_function, cfg.weight_monitoring)
+    train_step = make_train_step(loss_function)
     save_losses = make_loss_saver(loss_function)
+
+    total_steps = cfg.epochs * int(len(xtr_full) / cfg.batch_size)
+    if isinstance(cfg.save_loss_frequency, str):
+        total_steps_saved = cfg.epochs
+    else:
+        total_steps_saved = int(total_steps / cfg.save_loss_frequency)
+
+    root = init_weight_store(run_dir / "weights.zarr", state.params, total_steps_saved + 1)
+
+    # Save initial weights if weight_monitoring is activated
+    save_step_counter = 0
+    append_params(root, state.params, save_step_counter, cast_dtype=np.float16) 
 
     for epoch in range(cfg.epochs):
         indices = batch_rng.permutation(len(xtr_np))
+
         if batch_size >= len(xtr_np):
             print("Using full-batch training.")
             xb = jnp.asarray(xtr_np[indices])
             yb = jnp.asarray(ytr_np[indices])
-            state, new_params = train_step(state, xb, yb)
+            state = train_step(state, xb, yb)
             should_save = True if cfg.save_loss_frequency == "epoch" else (
                 isinstance(cfg.save_loss_frequency, int)
                 and state.step % cfg.save_loss_frequency == 0
             )
             if should_save:
-                save_losses(history, state, xtr_full, ytr_full, xte_full, yte_full, epoch, total_epochs, progress, new_params)
+                save_step_counter += 1
+                save_losses(history, state, xtr_full, ytr_full, xte_full, yte_full, save_step_counter, total_steps_saved, progress)
+                append_params(root, state.params, save_step_counter, cast_dtype=np.float16) 
+
         else:
             for start in range(0, len(indices), batch_size):
                 batch_idx = indices[start:start + batch_size]
                 xb = jnp.asarray(xtr_np[batch_idx])
                 yb = jnp.asarray(ytr_np[batch_idx])
-                state, new_params = train_step(state, xb, yb)
+                state = train_step(state, xb, yb)
+
                 if cfg.save_loss_frequency == "epoch":
                     continue
                 elif isinstance(cfg.save_loss_frequency, int):
                     if state.step % cfg.save_loss_frequency == 0:
-                        save_losses(history, state, xtr_full, ytr_full, xte_full, yte_full, epoch, total_epochs, progress, new_params)
+                        save_step_counter += 1
+                        save_losses(history, state, xtr_full, ytr_full, xte_full, yte_full, save_step_counter, total_steps_saved, progress)
+                        append_params(root, state.params, save_step_counter, cast_dtype=np.float16) 
+ 
                 else: 
                     raise ValueError("Invalid save_loss_frequency value. Please provide an integer or 'epoch'.")
                
         if cfg.save_loss_frequency == "epoch":
-            save_losses(history, state, xtr_full, ytr_full, xte_full, yte_full, epoch, total_epochs, progress, new_params)
+            save_step_counter += 1
+            save_losses(history, state, xtr_full, ytr_full, xte_full, yte_full, save_step_counter, total_steps_saved, progress)
+            append_params(root, state.params, save_step_counter, cast_dtype=np.float16) 
 
     final_params = jax.device_get(state.params)
 
