@@ -27,7 +27,7 @@ PROGRAM="visualizations/plot_weight_update_similarity.py"
 
 # --- Per-task output/error dirs ----------------------------------------------
 JOB_ID="${JOB_DIR##*/}"
-OUTPUTDIR="${SLURMSCRIPTDIR}/figures_weight_update_similarity/${task}/${JOB}"
+OUTPUTDIR="${SLURMSCRIPTDIR}/figures_weight_update_similarity/${task}/${JOB_ID}"
 SLURMOUTDIR="${OUTPUTDIR}/slurm_output"
 
 mkdir -p "${SLURMOUTDIR}"
