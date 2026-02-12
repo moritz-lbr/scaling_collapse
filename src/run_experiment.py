@@ -21,14 +21,19 @@ def assemble(config_path):
     return resolved
 
 def run_experiments(input_path: Path, output_path: Path = None) -> int:
+
+    print("\nNote that the first entry of the weight log file contains the weights at initialization before the training has started.")
+    print("\nNote that the total number of training steps displayed in the progress bar refers to the number of training steps that are saved during training.")
+    print("The actual total number of training steps conducted in this training process can be obtained by multiplying the total number of steps displayed in the\n" \
+    "progress bar with the save_loss_frequency assigned in the training config, as only every save_loss_frequency step losses and weights are saved.")
+    print(f"\nRunning training for {input_path.name}") 
+    
     if str(input_path).endswith(".yaml"):
         if not output_path:
             output_dir = Path("./logs") 
         else:
             output_dir = output_path
         config = assemble(input_path)
-        print(f"Running training for {input_path.name}") 
-        run_experiment(config, output_dir)
 
     else:
         configs = input_path.joinpath("configs")
@@ -43,8 +48,9 @@ def run_experiments(input_path: Path, output_path: Path = None) -> int:
 
         for path in config_files:
             config = assemble(path)
-            print(f"Running training for {path.name}") 
-            run_experiment(config, output_dir)
+    
+    run_experiment(config, output_dir)
+
 
 def main():
     parser = argparse.ArgumentParser(description="Parser to run experiments from command line.")

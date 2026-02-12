@@ -29,18 +29,30 @@ def run_experiment(config_path: Path, output_dir: Path) -> None:
     run_dir = output_dir / run_name
     run_dir.mkdir(parents=True, exist_ok=True)
 
-    pbar = tqdm(total=cfg.epochs, desc=f"{run_name} training", unit="epoch", leave=False)
+    pbar = None
 
     def update_progress(*, epoch: int, total: int, train_loss: float, test_loss: float) -> None:
+        nonlocal pbar
+        if pbar is None:
+            # Create the bar only when the first metric is available so the initial render
+            # reflects step 1/total instead of an empty 0/1 placeholder.
+            pbar = tqdm(
+                total=total,
+                desc=f"{run_name} training",
+                unit="step",
+                leave=False,
+                initial=epoch,
+            )
         pbar.total = total
         pbar.n = epoch
         pbar.set_postfix(train=f"{train_loss:.4f}", test=f"{test_loss:.4f}", refresh=False)
         pbar.refresh()
 
     try:
-        result = run_once(cfg, progress=update_progress)
+        result = run_once(cfg, run_dir, progress=update_progress)
     finally:
-        pbar.close()
+        if pbar is not None:
+            pbar.close()
 
     dataset_info = result.get("dataset_info")
     dataset_info["input_dimension"] = cfg.num_input_features
