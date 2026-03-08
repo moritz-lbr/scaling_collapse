@@ -13,6 +13,7 @@ repo_root = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(repo_root))
 sys.path.insert(0, str(repo_root) + "/src")
 from tqdm import tqdm
+from sklearn.linear_model import LinearRegression
 
 from utils import load_yaml_as_dict
 
@@ -148,6 +149,7 @@ def plot_weight_update_similarity(job_dir: Path, outfile: Path | None, layer: st
                 leave=False
             )
 
+    prev_loss = None
     prev_step_norms = None
     smallest, second_largest = None, None
 
@@ -195,23 +197,43 @@ def plot_weight_update_similarity(job_dir: Path, outfile: Path | None, layer: st
             parameters = network_info.get("total_params")
             batch_size = dataset_info.get("batch_size")
             x_axis = np.array(range(1, len(losses) + 1)) * save_loss_frequency * batch_size * parameters
-            x_label = "Training Compute" 
+            x_label = r"Training Compute $c_{i}$ [log]"
         else:
             x_axis = np.array(range(1, len(losses) + 1)) * save_loss_frequency
-            x_label = "Training Steps" 
+            x_label = r"Training Steps $t_{i}$ [log]"
 
         line, = loss_log.plot(x_axis, losses, color=color)
-        legend_entries[scheme].append((line, label))
-        cos_log.plot(x_axis[:-2], similarities, color=color, label=label)
+        line, = cos_log.plot(x_axis[:-2], similarities, color=color, label=label)
         ax_step_norms.plot(x_axis[:-1], step_norms, color=color)
+
+        legend_entries[scheme].append((line, label))
 
         if prev_step_norms is None:
             prev_step_norms = step_norms
             continue
         else:
-            ratio = step_norms/prev_step_norms
+            reshaped_x = prev_step_norms.reshape(-1,1)
+            reshaped_y = step_norms
+            lin_reg = LinearRegression().fit(reshaped_x, reshaped_y)
+            fit_ratio = lin_reg.coef_
+            fit_intercept = lin_reg.intercept_
+            print("Slope:", fit_ratio)
+            print("Intercetp:",fit_intercept)
+            ratio = (step_norms)/(prev_step_norms)
             ax_step_norms_ratio.plot(x_axis[:-1], ratio, color=color)
+            # ax_step_norms_ratio.scatter(1000, fit_ratio, color=color)
             prev_step_norms = step_norms
+
+
+        # if prev_loss is None:
+        #     prev_loss = losses
+        #     continue
+        # else:
+        #     loss_ratio = losses/prev_loss
+        #     loss_log.plot(x_axis, loss_ratio, color=color)
+        #     prev_step_norms = step_norms
+            
+        
 
         # ax_path_lengths.plot(num_nodes, cum_path_length, color=color, marker="o")
         # ax_path_lengths.plot(num_nodes, normalized_distance, color=color, marker="D")
@@ -229,24 +251,24 @@ def plot_weight_update_similarity(job_dir: Path, outfile: Path | None, layer: st
 
     loss_log.set_xscale("log")
     loss_log.set_yscale("log")
-    loss_log.set_xlabel(f"{x_label} [log]", fontsize=16)
-    loss_log.set_ylabel(f"Training Loss [log]", fontsize=16)
+    loss_log.set_xlabel(x_label, fontsize=16)
+    loss_log.set_ylabel(x_label, fontsize=16)
     loss_log.grid(True, which="both", alpha=0.3)
     loss_log.tick_params(axis='both', labelsize=13)
 
-    cos_log.set_xlabel(r"Training Steps $t_{i}$ [log]", fontsize=16)
+    cos_log.set_xlabel(x_label, fontsize=16)
     cos_log.set_ylabel(r"$\cos(\Delta \vec{\theta}_{t_{i+1}}, \Delta \vec{\theta}_{t_{i}})$", fontsize=16)
     cos_log.grid(True, alpha=0.3)
     cos_log.set_xscale("log", base=10)
     cos_log.tick_params(axis="both", labelsize=13)
 
-    ax_step_norms.set_xlabel(r"Training Steps $t_{i}$ [log]", fontsize=16)
+    ax_step_norms.set_xlabel(x_label, fontsize=16)
     ax_step_norms.set_ylabel(r"$\| \Delta \vec{\theta}_{t_{i}} \| = \| \vec{\theta}_{t_{i+1}} - \vec{\theta}_{t_{i}}\|$", fontsize=16)
     ax_step_norms.grid(True, alpha=0.3)
     ax_step_norms.set_xscale("log", base=10)
     ax_step_norms.tick_params(axis="both", labelsize=13)
 
-    ax_step_norms_ratio.set_xlabel(r"Training Steps $t_{i}$ [log]", fontsize=16)
+    ax_step_norms_ratio.set_xlabel(x_label, fontsize=16)
     ax_step_norms_ratio.set_ylabel(r"$R(t)$", fontsize=16)
     ax_step_norms_ratio.grid(True, alpha=0.3)
     ax_step_norms_ratio.set_xscale("log", base=10)
@@ -297,12 +319,20 @@ def plot_weight_update_similarity(job_dir: Path, outfile: Path | None, layer: st
 
     prefix = Path(f"figures_weight_update_similarity/{task_name}/{job_dir.name}")
     prefix.mkdir(parents=True, exist_ok=True)
-    if outfile:
-        file_path = prefix / outfile
+
+    if compute_flag:
+        compute_appendix = "_c"
     else:
-        file_path = prefix / f"weight_metrics_{layer}.png"
+        compute_appendix = ""
+
+    if outfile:
+        file_path = prefix / (str(outfile) + compute_appendix)
+    else:
+        file_path = prefix / (f"weight_metrics_{layer}" +  compute_appendix + ".png")
+
     if file_path.suffix == "":
         file_path = file_path.with_suffix(".png")
+
     fig.savefig(file_path, bbox_inches="tight")
     print(f"Saved plot to {file_path}")
 
