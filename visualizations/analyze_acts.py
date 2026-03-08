@@ -174,6 +174,7 @@ def plot_layer_activations(log_dir: Path, outfile: Path | None) -> None:
     
         ax.tick_params(axis="y", which="both", labelleft=True)
         ax.grid(True, alpha=0.3)
+        ax.set_xlabel("Width (n)" + r"$[log_{2}]$", fontsize=15)
 
     if legend_handles:
         fig.legend(legend_handles, legend_labels, loc="lower center", ncol=len(legend_labels), frameon=False, fontsize=15)
