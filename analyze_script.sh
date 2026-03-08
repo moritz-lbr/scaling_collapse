@@ -23,7 +23,7 @@ set -euo pipefail
 SLURMSCRIPTDIR=$(pwd)
 SOURCEDIR="${SLURMSCRIPTDIR}"              # your source tree (contains main.py)
 PROGRAM="training_analysis/compute_metrics.py"                   # your Python entrypoint
-SLURMOUTDIR="${JOB_DIR}/training_analysis_slurm_output"
+SLURMOUTDIR="${JOB_DIR}/slurm_output_training_analysis"
 
 mkdir -p "${SLURMOUTDIR}"
 exec > "${SLURMOUTDIR}/task-${SLURM_ARRAY_TASK_ID}.out" 2>&1
