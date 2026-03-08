@@ -81,6 +81,7 @@ def run_experiment(config_path: Path, output_dir: Path) -> None:
 
     network_section = OrderedDict([
         ("num_hidden_layers", num_hidden_layers),
+        ("base_layer_width", cfg.base_layer_widths),
         ("activations_per_layer", cfg.activations_per_layer),
         ("nodes_per_layer", dict(_sorted_nodes(cfg.nodes_per_layer))),
         ("params_per_layer", per_layer_counts),
