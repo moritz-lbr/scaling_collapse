@@ -196,10 +196,10 @@ def plot_weight_update_similarity(job_dir: Path, outfile: Path | None, layer: st
         if compute_flag:
             parameters = network_info.get("total_params")
             batch_size = dataset_info.get("batch_size")
-            x_axis = np.array(range(1, len(losses) + 1)) * save_loss_frequency * batch_size * parameters
+            x_axis = np.array(range(0, len(losses))) * save_loss_frequency * batch_size * parameters
             x_label = r"Training Compute $c_{i}$ [log]"
         else:
-            x_axis = np.array(range(1, len(losses) + 1)) * save_loss_frequency
+            x_axis = np.array(range(0, len(losses))) * save_loss_frequency
             x_label = r"Training Steps $t_{i}$ [log]"
 
         line, = loss_log.plot(x_axis, losses, color=color)
@@ -221,49 +221,27 @@ def plot_weight_update_similarity(job_dir: Path, outfile: Path | None, layer: st
             print("Intercetp:",fit_intercept)
             ratio = (step_norms)/(prev_step_norms)
             ax_step_norms_ratio.plot(x_axis[:-1], ratio, color=color)
-            # ax_step_norms_ratio.scatter(1000, fit_ratio, color=color)
             prev_step_norms = step_norms
-
-
-        # if prev_loss is None:
-        #     prev_loss = losses
-        #     continue
-        # else:
-        #     loss_ratio = losses/prev_loss
-        #     loss_log.plot(x_axis, loss_ratio, color=color)
-        #     prev_step_norms = step_norms
-            
-        
 
         # ax_path_lengths.plot(num_nodes, cum_path_length, color=color, marker="o")
         # ax_path_lengths.plot(num_nodes, normalized_distance, color=color, marker="D")
         # ax_path_lengths.plot(num_nodes, overlap, color=color, marker="x")
 
-    ax_step_norms_ratio.plot(x_axis[:-1], ratio, color=color, label=r"$R(t) = \frac{\| \Delta \vec{\theta}_{t_{i}} \| (2N)}{\| \Delta \vec{\theta}_{t_{i}} \| (N)}$" + f"  N = {smallest} ... {second_largest}")
-    # ax_path_lengths.plot(num_nodes, cum_path_length, label=r"Cumulative Path Length: $F(T) = \sum_{t_{i}=1}^{T} \| \vec{\theta}_{t_{i+1}} - \vec{\theta}_{t_{i}} \|$", color=color, marker="o")
-    # ax_path_lengths.plot(num_nodes, normalized_distance, label=r"Normalized Distance: $\frac{\| \vec{\theta}_{T} - \vec{\theta}_{t_{0}} \|}{\| \vec{\theta}_{t_{0}} \|}$", color=color, marker="D")
-    # ax_path_lengths.plot(num_nodes, overlap, color=color, label=r"Overlap: $\frac{\sqrt{\langle \vec{\theta}_{T}, \vec{\theta}_{t_{0}} \rangle}}{\| \vec{\theta}_{t_{0}} \|}$", marker="x")
-    
-    path_lengths_legend = ax_step_norms_ratio.legend(fontsize=13)
-    for h in path_lengths_legend.legend_handles:
-        h.set_color("black")
-        h.set_markerfacecolor("black")
-
     loss_log.set_xscale("log")
     loss_log.set_yscale("log")
     loss_log.set_xlabel(x_label, fontsize=16)
-    loss_log.set_ylabel(x_label, fontsize=16)
+    loss_log.set_ylabel("Training Loss [log]", fontsize=16)
     loss_log.grid(True, which="both", alpha=0.3)
     loss_log.tick_params(axis='both', labelsize=13)
 
     cos_log.set_xlabel(x_label, fontsize=16)
-    cos_log.set_ylabel(r"$\cos(\Delta \vec{\theta}_{t_{i+1}}, \Delta \vec{\theta}_{t_{i}})$", fontsize=16)
+    cos_log.set_ylabel(r"$\cos(\Delta \vec{W}_{t_{i+1}}^{\," + layer[-1] + r"}, \Delta \vec{W}_{t_{i}}^{\," + layer[-1] + r"})$", fontsize=16)
     cos_log.grid(True, alpha=0.3)
     cos_log.set_xscale("log", base=10)
     cos_log.tick_params(axis="both", labelsize=13)
 
     ax_step_norms.set_xlabel(x_label, fontsize=16)
-    ax_step_norms.set_ylabel(r"$\| \Delta \vec{\theta}_{t_{i}} \| = \| \vec{\theta}_{t_{i+1}} - \vec{\theta}_{t_{i}}\|$", fontsize=16)
+    ax_step_norms.set_ylabel(r"$\| \Delta \vec{W}_{t_{i}}^{\," + layer[-1] + r"} \| = \| \vec{W}_{t_{i+1}}^{\," + layer[-1] + r"} - \vec{W}_{t_{i}}^{\," + layer[-1] + r"}\|$", fontsize=16)
     ax_step_norms.grid(True, alpha=0.3)
     ax_step_norms.set_xscale("log", base=10)
     ax_step_norms.tick_params(axis="both", labelsize=13)
