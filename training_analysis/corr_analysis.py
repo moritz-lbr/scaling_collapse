@@ -249,8 +249,11 @@ def layer_vectors_first_last_and_deltas(
                 )
 
             delta = curr - prev
+            delta_squared = delta**2
+            delta_sum = delta_squared.sum(axis=0)
+            log_deltas = np.log(delta_sum + 1e-12)  
             # Keep the output width dimension (32 for Dense_0 in this dataset).
-            collected.append(delta.sum(axis=0))
+            collected.append(log_deltas)
 
         if len(collected) == 1:
             return collected[0].astype(dtype, copy=False)
@@ -277,7 +280,7 @@ def compute_deltas(weight_history: List[Any], layer: str):
     return np.array(deltas), flattened[0], flattened[-1]
 
 
-def compute_running_covariances(xj: np.ndarray) -> np.ndarray:
+def compute_running_covariances(xj: np.ndarray, delta_t: int) -> np.ndarray:
     """
     Build per-step covariance matrices for xj with shape (T, D).
     Output shape is (T, D, D), where cov[t] uses rows xj[:t+1].
@@ -286,16 +289,17 @@ def compute_running_covariances(xj: np.ndarray) -> np.ndarray:
         raise ValueError(f"Expected xj with shape (T, D), got {xj.shape}")
 
     num_steps, num_features = xj.shape
-    cov = np.empty((num_steps, num_features, num_features), dtype=np.float32)
+    cov = np.empty((num_steps-delta_t, num_features, num_features), dtype=np.float32)
 
-    for t in range(num_steps):
+    for t in range(num_steps-delta_t):
         # bias=True avoids NaNs at t=0 (single sample -> zeros matrix).
-        cov[t] = np.cov(xj[: t + 1].T, rowvar=True, bias=True).astype(np.float32, copy=False)
+        cov[t] = np.cov(xj[t: t + delta_t].T, rowvar=True, bias=True).astype(np.float32, copy=False)
+        # cov[t] = np.corrcoef(xj[t: t + delta_t].T, rowvar=True).astype(np.float32, copy=False)
 
     return cov
 
 
-def analyze_training_run(log_dir: Path, output_dir: Path, layers: str) -> None:
+def analyze_training_run(log_dir: Path, delta_t: int, output_dir: Path, layers: str) -> None:
     log_data = load_training_log(log_dir)
     history = log_data.get("final_metrics").get("history")
     losses = history.get("train_loss")
@@ -318,7 +322,7 @@ def analyze_training_run(log_dir: Path, output_dir: Path, layers: str) -> None:
         xj = layer_vectors_first_last_and_deltas(
             f"{weights_path}/weights.zarr", layer, include=("kernel",)
         )
-        cov = compute_running_covariances(xj)
+        cov = compute_running_covariances(xj, delta_t)
 
         pbar.total = len(layers)
         pbar.n = layer_idx + 1
@@ -340,6 +344,12 @@ def main() -> None:
         help="Path to a job directory containing training_log.json files.",
     )
     parser.add_argument(
+        "--delta-t",
+        type=int,
+        required=True,
+        help="Time window for computing running covariances.",
+    )
+    parser.add_argument(
         "--output",
         type=Path,
         help="Optional filename to save the plot under figures_weight_update_similarity/.",
@@ -354,7 +364,7 @@ def main() -> None:
     )
 
     args = parser.parse_args()
-    analyze_training_run(args.log_dir, args.output, args.layers)
+    analyze_training_run(args.log_dir, args.delta_t, args.output, args.layers)
 
 
 if __name__ == "__main__":
