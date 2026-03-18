@@ -23,6 +23,7 @@ PROGRAM="visualizations/plot_weight_update_similarity.py"
 
 # JOB_DIR is passed in from vis_submit.sh -------------------------------------
 : "${JOB_DIR:?JOB_DIR must be provided via vis_submit.sh}"
+: "${COMPUTE_FLAG:?COMPUTE_FLAG must be provided via vis_submit.sh}"
 
 
 # --- Per-task output/error dirs ----------------------------------------------
@@ -59,7 +60,7 @@ print_info() {
 
 # --- Run the simulation -------------------------------------------------------
 run_simulation() {
-  pixi run python "${SOURCEDIR}/${PROGRAM}" --log-dir "${JOB_DIR}" --layer "${LAYER}"
+  pixi run python "${SOURCEDIR}/${PROGRAM}" --log-dir "${JOB_DIR}" --layer "${LAYER}" "${COMPUTE_FLAG}"
 }
 
 print_info

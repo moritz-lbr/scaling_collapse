@@ -14,6 +14,7 @@ set -euo pipefail
 # Pass the job directory that contains all folders of the separate jobs 
 # Example: ./vis_submit.sh /path/to/experiment
 JOB_DIR=${1:? "Please provide the directory containing all experiments as well as their configs and logs that were executed with this job-id: ./submit.sh <JOB_DIR>"}
+COMPUTE_FLAG=${2:-"--no-compute"}
 
 # Count configs (skip master)
 first_file="$(printf '%s\n' "$JOB_DIR"/*/simulation_config.yaml | sort | head -n 1)"
@@ -27,4 +28,4 @@ if [[ "$N" -eq 0 ]]; then
 fi
 
 # Export CONFIG_DIR to the job and set the array size
-sbatch --export=ALL,JOB_DIR="$JOB_DIR",N="$N",task="$task" --array=1-"$N" vis_script.sh
+sbatch --export=ALL,JOB_DIR="$JOB_DIR",COMPUTE_FLAG="$COMPUTE_FLAG",N="$N",task="$task" --array=1-"$N" vis_script.sh
