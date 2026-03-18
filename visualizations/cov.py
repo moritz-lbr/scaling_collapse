@@ -26,6 +26,7 @@ def load_covariances(npy_path: Path) -> np.ndarray:
 
 def save_covariance_snapshots(
     covariances: np.ndarray,
+    delta_t: int,
     output_dir: Path,
     *,
     cmap: str = "coolwarm",
@@ -41,36 +42,39 @@ def save_covariance_snapshots(
         )
 
     n_snapshots = covariances.shape[0]
-    start_idx = frame_stride - 1
-    selected_indices = list(range(start_idx, n_snapshots, frame_stride))
+    selected_indices = list(range(0, n_snapshots, frame_stride))
     if not selected_indices:
         raise ValueError("No covariance snapshots selected for plotting.")
 
-    vmin = float(np.min(covariances))
-    vmax = float(np.max(covariances))
-    if np.isclose(vmin, vmax):
-        vmax = vmin + 1e-12
+    # vmin = float(np.min(covariances))
+    # vmax = float(np.max(covariances))
+    # if np.isclose(vmin, vmax):
+    #     vmax = vmin + 1e-12
+    vmin, vmax = np.quantile(covariances[selected_indices[0]].flatten(), [0.01, 0.99])
+    colorbar_range = max(abs(vmin), abs(vmax))
 
     frame_paths: list[Path] = []
     fig, ax = plt.subplots(figsize=(6.5, 5.5), constrained_layout=True)
     image = ax.imshow(
         covariances[selected_indices[0]],
         cmap=cmap,
-        vmin=vmin,
-        vmax=vmax,
+        vmin=-colorbar_range,
+        vmax=colorbar_range,
         origin="lower",
         interpolation="nearest",
     )
     cbar = fig.colorbar(image, ax=ax, fraction=0.046, pad=0.04)
-    cbar.set_label("Covariance")
-    ax.set_xlabel("Variable j")
-    ax.set_ylabel("Variable i")
+    # cbar.set_label(r"$Cov_t(\tilde{X}_i, \tilde{X}_j)$")
+    ax.set_xlabel(r"$\tilde{X}_i$", fontsize=15)
+    ax.set_ylabel(r"$\tilde{X}_j$", fontsize=15)
 
     for frame_idx, t in enumerate(selected_indices):
         image.set_data(covariances[t])
-        true_step = (t + 1) * save_loss_frequency
-        ax.set_title(f"Covariance Heatmap (step={true_step})")
-        frame_path = output_dir / f"covariance_{frame_idx:03d}.png"
+        # true_step = (t + 1) * save_loss_frequency
+        window_start = (t) * save_loss_frequency
+        window_end = (t + delta_t-1) * save_loss_frequency
+        ax.set_title(r"$Cov(log \, \tilde{X}_i, log \, \tilde{X}_j)$" + f" (Training Step: {window_start}-{window_end})", fontsize=15)
+        frame_path = output_dir / f"corr_{frame_idx:03d}_log.png"
         fig.savefig(frame_path, dpi=150)
         frame_paths.append(frame_path)
 
@@ -112,6 +116,12 @@ def main() -> None:
         help="Path to covariance snapshots in .npy format with shape (T, N, N).",
     )
     parser.add_argument(
+        "--delta-t",
+        type=int,
+        required=True,
+        help="Time window for computing running covariances.",
+    )
+    parser.add_argument(
         "--output-dir",
         type=Path,
         default=repo_root / "figures_cov",
@@ -120,7 +130,7 @@ def main() -> None:
     parser.add_argument(
         "--gif-name",
         type=str,
-        default="cov_Dense_0.gif",
+        default="corr_Dense_0_log.gif",
         help="Filename of the generated GIF.",
     )
     parser.add_argument(
@@ -152,6 +162,7 @@ def main() -> None:
     covariances = load_covariances(args.cov_path)
     frame_paths = save_covariance_snapshots(
         covariances,
+        args.delta_t,
         args.output_dir,
         frame_stride=args.frame_stride,
         save_loss_frequency=args.save_loss_frequency,
