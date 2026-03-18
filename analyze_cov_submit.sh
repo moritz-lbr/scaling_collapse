@@ -13,10 +13,11 @@ set -euo pipefail
 #   ./analyze_cov_submit.sh /path/to/logs/job-12818757
 #   ./analyze_cov_submit.sh /path/to/logs/job-12818757 2
 #   ./analyze_cov_submit.sh /path/to/logs/job-12818757 3 Dense_0,Dense_1
-JOB_DIR=${1:? "Usage: ./analyze_cov_submit.sh <JOB_DIR> [SNAPSHOT_STRIDE] [LAYERS_CSV] [FRAME_DURATION_MS]"}
-SNAPSHOT_STRIDE=${2:-1}
-LAYERS_CSV=${3:-Dense_0}
-FRAME_DURATION_MS=${4:-80}
+JOB_DIR=${1:? "Usage: ./analyze_cov_submit.sh <JOB_DIR> [SNAPSHOT_STRIDE] [DELTA_T] [LAYERS_CSV] [FRAME_DURATION_MS]"}
+SNAPSHOT_STRIDE=${2:-10}
+DELTA_T=${3:-10}
+LAYERS_CSV=${4:-Dense_0}
+FRAME_DURATION_MS=${5:-80}
 
 if ! [[ "${SNAPSHOT_STRIDE}" =~ ^[0-9]+$ ]] || (( SNAPSHOT_STRIDE < 1 )); then
   echo "SNAPSHOT_STRIDE must be a positive integer, got: ${SNAPSHOT_STRIDE}"
@@ -38,6 +39,6 @@ fi
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 sbatch \
-  --export=ALL,JOB_DIR="${JOB_DIR}",SNAPSHOT_STRIDE="${SNAPSHOT_STRIDE}",LAYERS_CSV="${LAYERS_CSV}",FRAME_DURATION_MS="${FRAME_DURATION_MS}",N="${N}" \
+  --export=ALL,JOB_DIR="${JOB_DIR}",SNAPSHOT_STRIDE="${SNAPSHOT_STRIDE}",DELTA_T="${DELTA_T}",LAYERS_CSV="${LAYERS_CSV}",FRAME_DURATION_MS="${FRAME_DURATION_MS}",N="${N}" \
   --array=1-"${N}" \
   analyze_cov_script.sh

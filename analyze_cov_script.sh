@@ -20,6 +20,7 @@ set -euo pipefail
 SNAPSHOT_STRIDE="${SNAPSHOT_STRIDE:-1}"
 LAYERS_CSV="${LAYERS_CSV:-Dense_0}"
 FRAME_DURATION_MS="${FRAME_DURATION_MS:-80}"
+DELTA_T="${DELTA_T:-10}"
 
 SLURMSCRIPTDIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SOURCEDIR="${SLURMSCRIPTDIR}"
@@ -124,6 +125,7 @@ print_info() {
 run_corr_analysis() {
   pixi run python "${CORR_PROGRAM}" \
     --log-dir "${SELECTED_LOG}" \
+    --delta-t "${DELTA_T}" \
     --output "${OUTPUTDIR}" \
     --layers "${LAYERS[@]}"
 }
@@ -140,8 +142,8 @@ run_cov_visualization() {
 
     pixi run python "${COV_PROGRAM}" \
       --cov-path "${cov_file}" \
+      --delta-t "${DELTA_T}" \
       --output-dir "${layer_output_dir}" \
-      --gif-name "cov_${layer}.gif" \
       --frame-duration-ms "${FRAME_DURATION_MS}" \
       --frame-stride "${SNAPSHOT_STRIDE}" \
       --save-loss-frequency "${SAVE_LOSS_FREQUENCY}"
