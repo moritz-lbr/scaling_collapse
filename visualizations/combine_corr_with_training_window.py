@@ -10,6 +10,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Sequence, Tuple
+from tqdm import tqdm
 
 MPL_CACHE_DIR = Path(__file__).resolve().parent.parent / ".cache" / "matplotlib"
 MPL_CACHE_DIR.mkdir(parents=True, exist_ok=True)
@@ -21,6 +22,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 import yaml
+from matplotlib.offsetbox import TextArea
 from PIL import Image
 
 
@@ -96,6 +98,56 @@ def _build_combined_legend(
             labels.append(label)
 
     return handles, labels, header_indices
+
+
+def _insert_legend_subtitles(
+    legend: Any,
+    header_indices: Sequence[int],
+    subtitle: str,
+    fontsize: float,
+) -> None:
+    if not header_indices:
+        return
+
+    # Replace section headers with full-width text rows and insert the subtitle below each one.
+    columns_box = legend._legend_box.get_children()[1]  # type: ignore[attr-defined]
+    column_children = columns_box.get_children()
+    if not column_children:
+        return
+
+    column_box = column_children[0]
+    rows = list(column_box.get_children())
+    legend_texts = legend.get_texts()
+    offset = 0
+    for header_index in header_indices:
+        row_index = header_index + offset
+        header_box = TextArea(
+            legend_texts[header_index].get_text(),
+            textprops={
+                "fontsize": fontsize,
+                "fontweight": "bold",
+                "ha": "left",
+                "multialignment": "left",
+            },
+        )
+        header_box.set_figure(legend.figure)
+        rows[row_index] = header_box
+
+        subtitle_box = TextArea(
+            subtitle,
+            textprops={
+                "fontsize": fontsize,
+                "fontweight": "normal",
+                "ha": "left",
+                "multialignment": "left",
+            },
+        )
+        subtitle_box.set_figure(legend.figure)
+        rows.insert(row_index + 1, subtitle_box)
+        offset += 1
+
+    column_box._children = rows  # type: ignore[attr-defined]
+    legend.stale = True
 
 
 def collect_weight_metrics(weight_metrics_path: Path) -> Tuple[np.ndarray, np.ndarray]:
@@ -181,8 +233,8 @@ def infer_layer(corr_dir: Path, metrics_image: Path, layer: str | None) -> str:
 def infer_run_name(corr_dir: Path, run_name: str | None) -> str:
     if run_name:
         return run_name
-    if corr_dir.parent.name:
-        return corr_dir.parent.name
+    if corr_dir.parent.parent.name:
+        return corr_dir.parent.parent.name
     raise ValueError("Could not infer the training run directory. Pass --run-name explicitly.")
 
 
@@ -202,7 +254,7 @@ def load_save_loss_frequency(simulation_config_path: Path) -> int:
 
 
 def sorted_corr_frames(corr_dir: Path) -> List[Path]:
-    frame_paths = sorted(corr_dir.glob("corr_*_log.png"))
+    frame_paths = sorted(corr_dir.glob("cov_log_*.png"))
     if not frame_paths:
         raise FileNotFoundError(f"No correlation frames found in {corr_dir}")
     return frame_paths
@@ -317,7 +369,7 @@ def build_metrics_figure(
     task_name: str | None = None
     save_loss_frequency_for_title: int | None = None
 
-    for i, log_path in enumerate(log_paths):
+    for i, log_path in tqdm(enumerate(log_paths)):
         simulation_config_path = collect_files_with_ending(log_path.parent, "simulation_config.yaml")[0]
         weight_metrics_path = log_path.parent / "weight_metrics" / f"{layer}.json"
         simulation_info = load_yaml_as_dict(simulation_config_path)
@@ -369,12 +421,25 @@ def build_metrics_figure(
     if training_info is None or task_name is None or save_loss_frequency_for_title is None:
         raise ValueError(f"Could not build the metrics figure for {job_dir}")
 
+    with open(f"{log_path.parent.parent}/pareto_frontier/compute_optimal_points.json", "r") as f:
+            compute_opt_data = json.load(f)
+    c_opt_compute = np.array(compute_opt_data["opt_compute"])
+    l_opt_compute = np.array(compute_opt_data["min_loss"])
+    p_opt_compute = np.array(compute_opt_data["parameters"])
+
+        # loss_log.scatter(c_opt, l_opt, color="black", label="Pareto Frontier")
+    if not compute_flag:
+        c_opt_compute = c_opt_compute / (training_info.get("batch_size") * p_opt_compute)
+    
+    loss_log.scatter(c_opt_compute, l_opt_compute, color="black", label="Compute-optimal points: \n" + r"$(c^{*}(p),\, L(c^{*}(p)))$")
+
     loss_log.set_xscale("log")
     loss_log.set_yscale("log")
     loss_log.set_xlabel(x_label, fontsize=16)
     loss_log.set_ylabel(x_label, fontsize=16)
     loss_log.grid(True, which="both", alpha=0.3)
     loss_log.tick_params(axis="both", labelsize=13)
+    loss_log.legend(loc="upper right", frameon=True, borderaxespad=0.0, fontsize=16)
 
     cos_log.set_xlabel(x_label, fontsize=16)
     cos_log.set_ylabel(
@@ -395,15 +460,18 @@ def build_metrics_figure(
     ax_step_norms.tick_params(axis="both", labelsize=13)
 
     ax_step_norms_ratio.set_xlabel(x_label, fontsize=16)
-    ax_step_norms_ratio.set_ylabel(r"$R(t)$", fontsize=16)
+    ax_step_norms_ratio.set_ylabel(r"$R(t) = \frac{\| \Delta \vec{W}_{t_{i}}^{\," + layer[-1] + r"} \|(2N)}{\| \Delta \vec{W}_{t_{i}}^{\," + layer[-1] + r"} \|(N)}$", fontsize=16)
     ax_step_norms_ratio.grid(True, alpha=0.3)
     ax_step_norms_ratio.set_xscale("log", base=10)
     ax_step_norms_ratio.tick_params(axis="both", labelsize=13)
-    ax_step_norms_ratio.set_ylim(0, 2)
+    ymin, ymax = np.quantile(ratio.flatten(), [0.01, 0.99])
+    ax_step_norms_ratio.set_ylim(ymin, ymax)
+    ax_step_norms_ratio.legend(loc="upper left", frameon=True, borderaxespad=0.0, fontsize=16)
 
+    legend_subtitle = r"Layer Widths: $n^0 \times n^1$"
     legend_titles = {
-        "standard": "Standard parametrization",
-        "muP": "muP parametrization",
+        "standard": "SP",
+        "muP": "muP",
     }
     combined_handles, combined_labels, header_indices = _build_combined_legend(
         legend_entries, legend_titles
@@ -420,8 +488,7 @@ def build_metrics_figure(
             fontsize=13,
         )
         legend._legend_box.align = "left"  # type: ignore[attr-defined]
-        for index in header_indices:
-            legend.get_texts()[index].set_fontweight("bold")
+        _insert_legend_subtitles(legend, header_indices, legend_subtitle, 13)
 
     loss_log.text(
         0.1,
@@ -429,7 +496,7 @@ def build_metrics_figure(
         (
             f"lr = {training_info.get('lr')} \n"
             f"epochs = {training_info.get('epochs')} \n"
-            f"batch size = {training_info.get('batch_size')}"
+            f"batch size = {training_info.get('batch_size')} \n"
         ),
         transform=loss_log.transAxes,
         ha="left",
@@ -752,7 +819,7 @@ def main() -> None:
         "--corr-dir",
         type=Path,
         required=True,
-        help="Directory containing correlation frames such as corr_000_log.png.",
+        help="Directory containing correlation frames such as cov_log_000_log.png.",
     )
     parser.add_argument(
         "--metrics-image",
@@ -850,7 +917,7 @@ def main() -> None:
     parser.add_argument(
         "--sampling-mode",
         choices=("all", "log-decades"),
-        default="all",
+        default="log-decades",
         help=(
             "Frame selection strategy. 'log-decades' keeps the first frame and "
             "then only frames at decade landmarks such as 100, 200, ..., 1000, "
