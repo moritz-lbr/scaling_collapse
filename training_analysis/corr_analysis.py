@@ -7,7 +7,7 @@ import os
 import sys
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
-import zarr
+import zarr # type: ignore
 repo_root = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(repo_root))
 sys.path.insert(0, str(repo_root) + "/src")
@@ -221,7 +221,7 @@ def layer_vectors_first_last_and_deltas(
                 )
         return np.empty((0, int(row_dim)), dtype=dtype)
 
-    def delta_row_sum(curr_t: int, prev_t: int) -> np.ndarray:
+    def delta_column_sum(curr_t: int, prev_t: int) -> np.ndarray:
         """Compute sum_over_columns(W_curr - W_prev), preserving row dimension."""
         row_dim: int | None = None
         collected: List[np.ndarray] = []
@@ -250,6 +250,13 @@ def layer_vectors_first_last_and_deltas(
 
             delta = curr - prev
             delta_squared = delta**2
+            if grp == "Dense_1":
+                delta_squared = delta_squared.T
+
+            # if grp == dsets[0][-1]:
+            #     delta_sum = delta_squared.sum(axis=1)
+            # else:
+            #     delta_sum = delta_squared.sum(axis=0)
             delta_sum = delta_squared.sum(axis=0)
             log_deltas = np.log(delta_sum + 1e-12)  
             # Keep the output width dimension (32 for Dense_0 in this dataset).
@@ -260,11 +267,11 @@ def layer_vectors_first_last_and_deltas(
 
         return np.stack(collected, axis=0).sum(axis=0).astype(dtype, copy=False)
 
-    first_delta = delta_row_sum(1, 0)
+    first_delta = delta_column_sum(1, 0)
     delta_matrix = np.empty((T - 1, first_delta.shape[0]), dtype=dtype)
     delta_matrix[0] = first_delta
     for t in range(2, T):
-        delta_matrix[t - 1] = delta_row_sum(t, t - 1)
+        delta_matrix[t - 1] = delta_column_sum(t, t - 1)
 
     return delta_matrix
 
