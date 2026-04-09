@@ -21,14 +21,19 @@ SLURMSCRIPTDIR=$(pwd)
 SOURCEDIR="${SLURMSCRIPTDIR}"  
 PROGRAM="visualizations/plot_weight_update_similarity.py"         
 
-# JOB_DIR is passed in from vis_submit.sh -------------------------------------
-: "${JOB_DIR:?JOB_DIR must be provided via vis_submit.sh}"
+# A single target job directory is passed in from vis_submit.sh as a positional argument.
 : "${COMPUTE_FLAG:?COMPUTE_FLAG must be provided via vis_submit.sh}"
+: "${JOB_GROUP_NAME:?JOB_GROUP_NAME must be provided via vis_submit.sh}"
+
+if [[ "$#" -ne 1 ]]; then
+  echo "Exactly one target job directory must be passed to vis_script.sh."
+  exit 1
+fi
+JOB_DIR="$1"
 
 
 # --- Per-task output/error dirs ----------------------------------------------
-JOB_ID="${JOB_DIR##*/}"
-OUTPUTDIR="${SLURMSCRIPTDIR}/figures_weight_update_similarity/${task}/${JOB_ID}"
+OUTPUTDIR="${SLURMSCRIPTDIR}/figures_weight_update_similarity/${task}/${JOB_GROUP_NAME}"
 SLURMOUTDIR="${OUTPUTDIR}/slurm_output"
 
 mkdir -p "${SLURMOUTDIR}"
