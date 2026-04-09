@@ -19,6 +19,8 @@ def run_experiment(config_path: Path, output_dir: Path) -> None:
     cfg = create_config(sim_config)
 
     # Collect data from training configs and create config class
+    print(cfg.task)
+    print(collect_files_with_ending(cfg.task, "dataset_overview.yaml"))
     data_config_path = collect_files_with_ending(cfg.task, "dataset_overview.yaml")[0]
     data_config = load_yaml_as_dict(data_config_path)["training"]
 
