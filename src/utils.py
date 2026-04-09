@@ -167,35 +167,32 @@ def load_teacher_dataset(path) -> Tuple[np.ndarray, np.ndarray]:
             )
     return inputs, outputs
 
-def make_regression_data(n_train=2048, n_test=1024, phase=0.0, target="sin_mix"):
-    rng = np.random.default_rng()
-    x_tr = rng.uniform(-np.pi, np.pi, size=(n_train, 1)).astype(np.float32)
-    x_te = rng.uniform(np.pi, 2*np.pi, size=(n_test, 1)).astype(np.float32)
-
-    def f(x):
-        if target == "sin":
-            return np.sin(x + phase)
-        elif target == "sin_mix":
-            return np.sin(x) + 0.3*np.sin(3*x + phase)
-        elif target == "sin_sin":
-            return np.sin(np.sin(x))
-        elif target == "cos_sin":
-            return np.cos(2*x) * np.sin(0.5*x)
-        else:
-            raise ValueError(f"unknown target: {target}")
-
-    y_tr = f(x_tr).astype(np.float32)
-    y_te = f(x_te).astype(np.float32)
-    return (x_tr, y_tr), (x_te, y_te)
-
 # ----------------------------
 # Loss
 # ----------------------------
 
+def first_layer_term_matrix(params, first_layer_activation_matrix):
+    if "Dense_1" not in params or "kernel" not in params["Dense_1"]:
+        raise ValueError("Could not find Dense_1/kernel needed to compute first-layer term matrix.")
+
+    second_layer_kernel = params["Dense_1"]["kernel"]
+    if second_layer_kernel.ndim != 2 or second_layer_kernel.shape[1] != 1:
+        raise ValueError(
+            "Expected Dense_1/kernel to have shape (width_0, 1) so the saved term matrix has shape (5, width_0). "
+            f"Got shape {second_layer_kernel.shape}."
+        )
+    print(second_layer_kernel.shape[0])
+
+    return second_layer_kernel.shape[0] * first_layer_activation_matrix * second_layer_kernel[:, 0].astype(jnp.float32)
+
 def mse_loss(params, apply_fn, xb, yb, return_layer_act=False):
     if return_layer_act:
-        preds, acts = apply_fn({"params": params}, xb, capture_layer_acts=True)
-        return jnp.mean((preds - yb) ** 2), jnp.mean(acts, axis=0)
+        preds, acts, first_layer_activation_matrix = apply_fn({"params": params}, xb, capture_layer_acts=True)
+        return (
+            jnp.mean((preds - yb) ** 2),
+            jnp.mean(acts, axis=0),
+            first_layer_term_matrix(params, first_layer_activation_matrix),
+        )
     else:
         preds = apply_fn({"params": params}, xb)
         return jnp.mean((preds - yb) ** 2)
@@ -218,9 +215,13 @@ def mse_loss(params, apply_fn, xb, yb, return_layer_act=False):
 
 def cross_entropy_loss(params, apply_fn, xb, yb, return_layer_act=False):
     if return_layer_act:
-        preds, acts = apply_fn({"params": params}, xb, capture_layer_acts=True)
+        preds, acts, first_layer_activation_matrix = apply_fn({"params": params}, xb, capture_layer_acts=True)
         labels_onehot = jax.nn.one_hot(yb, 10, dtype=jnp.float32)
-        return jnp.mean(optax.safe_softmax_cross_entropy(preds, labels=labels_onehot), axis=0), jnp.mean(acts, axis=0)
+        return (
+            jnp.mean(optax.safe_softmax_cross_entropy(preds, labels=labels_onehot), axis=0),
+            jnp.mean(acts, axis=0),
+            first_layer_term_matrix(params, first_layer_activation_matrix),
+        )
     else:
         preds = apply_fn({"params": params}, xb)
         labels_onehot = jax.nn.one_hot(yb, 10, dtype=jnp.float32)
