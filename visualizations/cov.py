@@ -52,6 +52,7 @@ def save_covariance_snapshots(
     #     vmax = vmin + 1e-12
     vmin, vmax = np.quantile(covariances[selected_indices[0]].flatten(), [0.01, 0.99])
     colorbar_range = max(abs(vmin), abs(vmax))
+    # colorbar_range = 1e-1
 
     frame_paths: list[Path] = []
     fig, ax = plt.subplots(figsize=(6.5, 5.5), constrained_layout=True)
@@ -68,13 +69,16 @@ def save_covariance_snapshots(
     ax.set_xlabel(r"$\tilde{X}_i$", fontsize=15)
     ax.set_ylabel(r"$\tilde{X}_j$", fontsize=15)
 
+    cov_log_path = output_dir / "cov_log_frames"
+    cov_log_path.mkdir(parents=True, exist_ok=True)
+
     for frame_idx, t in enumerate(selected_indices):
         image.set_data(covariances[t])
         # true_step = (t + 1) * save_loss_frequency
         window_start = (t) * save_loss_frequency
         window_end = (t + delta_t-1) * save_loss_frequency
         ax.set_title(r"$Cov(log \, \tilde{X}_i, log \, \tilde{X}_j)$" + f" (Training Step: {window_start}-{window_end})", fontsize=15)
-        frame_path = output_dir / f"corr_{frame_idx:03d}_log.png"
+        frame_path = cov_log_path / f"cov_log_{frame_idx:03d}.png"
         fig.savefig(frame_path, dpi=150)
         frame_paths.append(frame_path)
 
