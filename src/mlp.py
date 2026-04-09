@@ -28,6 +28,7 @@ class MLP(nn.Module):
     @nn.compact
     def __call__(self, x, capture_layer_acts: bool = False):
         layer_acts = []
+        first_layer_activation_matrix = None
 
         # Cast inputs to compute dtype (BF16)
         x = x.astype(self.compute_dtype)
@@ -46,6 +47,8 @@ class MLP(nn.Module):
         if capture_layer_acts:
             layer_acts.append(jnp.abs(x).astype(jnp.float32).mean(axis=1))
         x = self.acts[0](x)
+        if capture_layer_acts:
+            first_layer_activation_matrix = x[:5].astype(jnp.float32)
 
         # Hidden layers
         for i, w in enumerate(self.widths[1:-1], start=1):
@@ -82,6 +85,5 @@ class MLP(nn.Module):
         y = self.acts[-1](y).astype(self.output_dtype)
 
         if capture_layer_acts:
-            return y, stacked_act
+            return y, stacked_act, first_layer_activation_matrix
         return y
-
