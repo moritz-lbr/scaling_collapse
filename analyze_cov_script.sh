@@ -17,15 +17,12 @@ set -euo pipefail
 ################ BASH SCRIPT #################
 
 : "${JOB_DIR:?JOB_DIR must be provided via analyze_cov_submit.sh}"
-SNAPSHOT_STRIDE="${SNAPSHOT_STRIDE:-1}"
-LAYERS_CSV="${LAYERS_CSV:-Dense_0}"
-FRAME_DURATION_MS="${FRAME_DURATION_MS:-80}"
-DELTA_T="${DELTA_T:-10}"
 
 SLURMSCRIPTDIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SOURCEDIR="${SLURMSCRIPTDIR}"
 CORR_PROGRAM="training_analysis/corr_analysis.py"
 COV_PROGRAM="visualizations/cov.py"
+COMBINED_FIGURE_PROGRAM="visualizations/combine_corr_with_training_window.py"
 SLURMOUTDIR="${JOB_DIR}/slurm_output_cov_analysis"
 
 mkdir -p "${SLURMOUTDIR}"
@@ -64,7 +61,7 @@ import sys
 import yaml
 
 cfg = yaml.safe_load(open(sys.argv[1])) or {}
-value = cfg.get("training", {}).get("save_loss_frequency", 1)
+value = cfg.get("training", {}).get("save_loss_frequency")
 
 if isinstance(value, str):
     if value.strip().lower() == "epoch":
@@ -150,6 +147,27 @@ run_cov_visualization() {
   done
 }
 
+run_combined_figure_visualization() {
+  for layer in "${LAYERS[@]}"; do
+    cov_dir="${COV_ROOT}/${TASK_NAME}/${JOB_ID}/${TRAINING_NAME}/${layer}"
+    if [[ ! -d "${cov_dir}" ]]; then
+      echo "Expected covariance directory missing: ${cov_dir}"
+      exit 1
+    fi
+
+    metrics_image="figures_weight_update_similarity/${TASK_NAME}/${JOB_ID}/weight_metrics_${layer}.png"
+
+    pixi run python "${COMBINED_FIGURE_PROGRAM}" \
+      --corr-dir "${cov_dir}/cov_log_frames" \
+      --metrics-image "${metrics_image}" \
+      --job-dir "${JOB_DIR}" \
+      --output-gif "${cov_dir}/combined_weight_metrics_${layer}.gif" \
+      --keep-frames-dir "${cov_dir}/combined_weight_metrics_${layer}_frames" \
+      --sampling-mode log-decades
+  done
+}
+
+
 print_info
 
 run_corr_analysis
@@ -164,6 +182,13 @@ cov_returncode=$?
 if [[ ${cov_returncode} -ne 0 ]]; then
   echo "cov visualization failed with code ${cov_returncode}"
   exit ${cov_returncode}
+fi
+
+run_combined_figure_visualization
+combined_figure_returncode=$?
+if [[ ${combined_figure_returncode} -ne 0 ]]; then
+  echo "combined figure creation failed with code ${combined_figure_returncode}"
+  exit ${combined_figure_returncode}
 fi
 
 echo "Analysis and covariance visualizations completed successfully."
