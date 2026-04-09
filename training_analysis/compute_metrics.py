@@ -243,7 +243,7 @@ def compute_deltas(weight_history: List[Any], layer: str):
 def _cumulative_and_actual_path_length(deltas: List[Any], initial_weights: np.ndarray, final_weights: np.ndarray) -> Tuple[float, float, float]:
     step_norms: List = []
     for i in range(0, len(deltas)):
-        step_norms.append(np.linalg.norm(deltas[i]))
+        step_norms.append(np.linalg.norm(deltas[i])**2)
     step_norms = np.array(step_norms)
     cum_path_length = np.sum(step_norms)
     delta_T = np.linalg.norm(final_weights - initial_weights)
@@ -275,7 +275,7 @@ def compute_metrics(history, weights_path, layer):
         similarities: List[float] = []
         dw_prev = None
         for t, dw in iter_layer_weight_deltas(f"{weights_path}/weights.zarr", layer, include=("kernel")):
-            step_norms.append(float(np.linalg.norm(dw)))
+            step_norms.append(float(np.linalg.norm(dw))**2)
             if dw_prev is None:
                 dw_prev = dw
                 pass
