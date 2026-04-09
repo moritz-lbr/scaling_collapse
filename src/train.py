@@ -24,7 +24,13 @@ def make_train_step(loss_fn):
 def make_loss_saver(loss_fn):
     def save_losses(history, state, xtr_full, ytr_full, xte_full, yte_full, train_step, total_train_steps, progress=None):
         train_loss = loss_fn(state.params, state.apply_fn, xtr_full, ytr_full)
-        test_loss, layer_activations = loss_fn(state.params, state.apply_fn, xte_full, yte_full, return_layer_act=True)
+        test_loss, layer_activations, first_layer_term_matrix = loss_fn(
+            state.params,
+            state.apply_fn,
+            xte_full,
+            yte_full,
+            return_layer_act=True,
+        )
         
         history["train_loss"].append(float(train_loss))
         history["test_loss"].append(float(test_loss))
@@ -37,14 +43,11 @@ def make_loss_saver(loss_fn):
                 train_loss=float(train_loss),
                 test_loss=float(test_loss),
             )
+        return first_layer_term_matrix
     return save_losses
 
-def init_weight_store(zarr_path, params, total_steps, sep="/", dtype=None, time_chunk=64):
-    root = zarr.open_group(zarr_path, mode="w")
-    flat = flatten_dict(params, sep=sep)
-
-    root.attrs["total_steps"] = int(total_steps)
-    root.attrs["param_keys"] = list(flat.keys())
+def _create_tree_datasets(root, tree, total_steps, sep="/", dtype=None, time_chunk=64):
+    flat = flatten_dict(tree, sep=sep)
 
     for k, v in flat.items():
         v0 = np.array(jax.device_get(v))
@@ -53,19 +56,55 @@ def init_weight_store(zarr_path, params, total_steps, sep="/", dtype=None, time_
         root.create_dataset(
             name=k,
             shape=(total_steps,) + v0.shape,
-            chunks=(min(time_chunk, total_steps),) + v0.shape,  # chunk along time
+            chunks=(min(time_chunk, total_steps),) + v0.shape,
             dtype=dt,
         )
+    return list(flat.keys())
+
+def init_weight_store(zarr_path, params, total_steps, sep="/", dtype=None, time_chunk=64):
+    root = zarr.open_group(zarr_path, mode="w")
+    root.attrs["total_steps"] = int(total_steps)
+    root.attrs["param_keys"] = _create_tree_datasets(
+        root,
+        params,
+        total_steps,
+        sep=sep,
+        dtype=dtype,
+        time_chunk=time_chunk,
+    )
     return root
 
-def append_params(root, params, step, sep="/", cast_dtype=None):
-    flat = flatten_dict(params, sep=sep)
+def init_term_store(root, total_steps, num_term_vectors, term_width, sep="/", time_chunk=64):
+    term_tree = {"terms": np.zeros((num_term_vectors, term_width), dtype=np.float32)}
+    root.attrs["term_keys"] = _create_tree_datasets(
+        root,
+        term_tree,
+        total_steps,
+        sep=sep,
+        dtype=np.float32,
+        time_chunk=time_chunk,
+    )
+
+def append_tree(root, tree, step, sep="/", cast_dtype=None):
+    flat = flatten_dict(tree, sep=sep)
 
     for k, v in flat.items():
         arr = np.array(jax.device_get(v))
         if cast_dtype is not None:
             arr = arr.astype(cast_dtype)
         root[k][int(step), ...] = arr
+
+def append_params(root, params, step, sep="/", cast_dtype=None):
+    append_tree(root, params, step, sep=sep, cast_dtype=cast_dtype)
+
+def append_first_layer_terms(root, term_matrix, step, sep="/", cast_dtype=None):
+    append_tree(
+        root,
+        {"terms": term_matrix},
+        step,
+        sep=sep,
+        cast_dtype=cast_dtype,
+    )
 
 
 def run_once(
@@ -116,6 +155,13 @@ def run_once(
     ytr_full = jnp.asarray(ytr_np)
     xte_full = jnp.asarray(xte)
     yte_full = jnp.asarray(yte)
+    num_term_vectors = 5
+
+    if xte_full.shape[0] < num_term_vectors:
+        raise ValueError(
+            f"Need at least {num_term_vectors} evaluation samples to save first-layer terms, "
+            f"but found only {xte_full.shape[0]}."
+        )
 
     init_seed = int(rng_source.integers(0, np.iinfo(np.uint32).max, dtype=np.uint32))
     rng = jax.random.key(init_seed)
@@ -135,7 +181,10 @@ def run_once(
     )
 
     history = {"train_loss": [], "test_loss": [], "layer_activations": []}
-    batch_rng = rng_source
+    if cfg.batch_seed == 'random':
+        batch_rng = np.random.default_rng()
+    else:
+        batch_rng = np.random.default_rng(seed=cfg.batch_seed)
     batch_size = cfg.batch_size if cfg.batch_size and cfg.batch_size > 0 else len(xtr_np)
 
     if cfg.loss_type == "mse":
@@ -155,10 +204,20 @@ def run_once(
         total_steps_saved = int(total_steps / cfg.save_loss_frequency)
 
     root = init_weight_store(run_dir / "weights.zarr", state.params, total_steps_saved + 1)
+    init_term_store(root, total_steps_saved + 1, num_term_vectors, cfg.widths[0])
+    # weight_update_cov_root = init_weight_store(run_dir / "weights_cov_samples.zarr", state.params, (total_steps_saved + 1) * cfg.weight_update_covariance_samples)
 
     # Save initial weights if weight_monitoring is activated
     save_step_counter = 0
     append_params(root, state.params, save_step_counter, cast_dtype=np.float16) 
+    _, _, initial_first_layer_term_matrix = loss_function(
+        state.params,
+        state.apply_fn,
+        xte_full,
+        yte_full,
+        return_layer_act=True,
+    )
+    append_first_layer_terms(root, initial_first_layer_term_matrix, save_step_counter)
 
     for epoch in range(cfg.epochs):
         indices = batch_rng.permutation(len(xtr_np))
@@ -174,8 +233,19 @@ def run_once(
             )
             if should_save:
                 save_step_counter += 1
-                save_losses(history, state, xtr_full, ytr_full, xte_full, yte_full, save_step_counter, total_steps_saved, progress)
+                first_layer_term_matrix = save_losses(
+                    history,
+                    state,
+                    xtr_full,
+                    ytr_full,
+                    xte_full,
+                    yte_full,
+                    save_step_counter,
+                    total_steps_saved,
+                    progress,
+                )
                 append_params(root, state.params, save_step_counter, cast_dtype=np.float16) 
+                append_first_layer_terms(root, first_layer_term_matrix, save_step_counter)
 
         else:
             for start in range(0, len(indices), batch_size):
@@ -183,22 +253,50 @@ def run_once(
                 xb = jnp.asarray(xtr_np[batch_idx])
                 yb = jnp.asarray(ytr_np[batch_idx])
                 state = train_step(state, xb, yb)
+                # if cfg.weight_update_covariance_samples is not None:
+                #     for i in range(cfg.weight_update_covariance_samples):
+                #         cov_sample_batch = batch_rng.choice(len(xtr_np), size=batch_size, replace=False)
+                #         cov_xb = jnp.asarray(xtr_np[cov_sample_batch])
+                #         cov_yb = jnp.asarray(ytr_np[cov_sample_batch])
+                #         weight_update_cov_step = train_step(state, cov_xb, cov_yb)
 
                 if cfg.save_loss_frequency == "epoch":
                     continue
                 elif isinstance(cfg.save_loss_frequency, int):
                     if state.step % cfg.save_loss_frequency == 0:
                         save_step_counter += 1
-                        save_losses(history, state, xtr_full, ytr_full, xte_full, yte_full, save_step_counter, total_steps_saved, progress)
+                        first_layer_term_matrix = save_losses(
+                            history,
+                            state,
+                            xtr_full,
+                            ytr_full,
+                            xte_full,
+                            yte_full,
+                            save_step_counter,
+                            total_steps_saved,
+                            progress,
+                        )
                         append_params(root, state.params, save_step_counter, cast_dtype=np.float16) 
+                        append_first_layer_terms(root, first_layer_term_matrix, save_step_counter)
  
                 else: 
                     raise ValueError("Invalid save_loss_frequency value. Please provide an integer or 'epoch'.")
                
         if cfg.save_loss_frequency == "epoch":
             save_step_counter += 1
-            save_losses(history, state, xtr_full, ytr_full, xte_full, yte_full, save_step_counter, total_steps_saved, progress)
+            first_layer_term_matrix = save_losses(
+                history,
+                state,
+                xtr_full,
+                ytr_full,
+                xte_full,
+                yte_full,
+                save_step_counter,
+                total_steps_saved,
+                progress,
+            )
             append_params(root, state.params, save_step_counter, cast_dtype=np.float16) 
+            append_first_layer_terms(root, first_layer_term_matrix, save_step_counter)
 
     final_params = jax.device_get(state.params)
 
