@@ -15,6 +15,7 @@ class Config:
     wd: float
     epochs: int
     batch_size: int
+    batch_seed: Any
     task: str
     test_split: float
     save_loss_frequency: Any
