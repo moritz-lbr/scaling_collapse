@@ -6,6 +6,9 @@ import os
 import yaml
 from scipy.interpolate import interp1d
 import pdb
+import matplotlib
+
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from scipy.optimize import minimize
 from itertools import product
@@ -141,13 +144,17 @@ def fit_loss_compute_power_law(C, L, num_inits=10, L0=None):
     # a_inits = np.logspace(np.log10(a_range[0]), np.log10(a_range[1]), num_inits)
     # b_inits = np.linspace(b_range[0], b_range[1], num_inits)
 
-    a_range = [1e3, 1e8]          # tighter: [5e2, 5e7]
-    b_range = [0.2, 2.2]
-    a_inits = np.logspace(7, 9, 10)
-    b_inits = np.linspace(0.2, 2.2, 10)
+    # a_inits = np.logspace(7, 9, 10)
+    # b_inits = np.linspace(0.2, 2.2, 10)
 
-    L0_range = [0.0, 0.013]
-    L0_inits = np.linspace(0.0, 0.013, 10)
+    # L0_range = [0.0, 0.013]
+    # L0_inits = np.linspace(0.0, 0.013, 10)
+
+    a_inits = np.logspace(-1, 0, 10)
+    b_inits = np.linspace(0.01, 0.1, 10)
+
+    L0_range = [0.01, 0.15]
+    L0_inits = np.linspace(0.01, 0.15, 10)
 
     
     if L0 is None:
@@ -323,6 +330,7 @@ def plot_rescaled_loss_curves(file_path):
         ymax = interp1d(compute, loss, bounds_error=False, fill_value=np.inf)(0.1)
         ax.plot(compute, loss, color=cmap[i], label="Optimal Points")
         ax.set_ylim(1.0, ymax)
+        # ax.set_xscale("log")
         plt.xlabel("Normalized Compute", fontsize=30)
         plt.ylabel("Normalized Loss", fontsize=30)
         plt.xlim(0.0, 1.0)
@@ -341,7 +349,7 @@ def main(log_path, c_min, c_max, n_points):
     c_opt = c_opt[mask] 
     l_min = l_min[mask]
 
-    print(f"compute[2][:3]: {compute[2][:3]:.2e}")
+    # print(f"compute[2][:3]: {compute[2][:3]:.2e}")
 
     compute_params_power_law = fit_power_law(p_opt, c_opt)
     per_curve_opt_loss, per_curve_opt_compute = get_curve_optimal_points(params, compute_params_power_law, losses, compute)
@@ -363,12 +371,13 @@ if __name__ == "__main__":
     # log_path = "/project/theorie/m/M.Rautenberg/scaling_collapse/experiments/test/logs/job-13274968"
     # log_path = "/project/theorie/m/M.Rautenberg/scaling_collapse/experiments/test/logs/job-13294144"
     # log_path = "/project/theorie/m/M.Rautenberg/scaling_collapse/experiments/test/logs/job-13275993"
-    log_path = "/project/theorie/m/M.Rautenberg/scaling_collapse/experiments/test/logs/job-13365173"
+    # log_path = "/project/theorie/m/M.Rautenberg/scaling_collapse/experiments/test/logs/job-13365173"
     # log_path = "/project/theorie/m/M.Rautenberg/scaling_collapse/experiments/test/logs/job-combined"
     # log_path = "/project/theorie/m/M.Rautenberg/scaling_collapse/experiments/test/logs/job-13423237"
     # log_path = "/project/theorie/m/M.Rautenberg/scaling_collapse/experiments/test/logs/avg_job-13423237_job-13423464"
-    c_min = 5e7
-    c_max = 2e9
+    log_path = "/project/theorie/m/M.Rautenberg/scaling_collapse/experiments/mup/logs/job-13656168"
+    c_min = 4e10
+    c_max = 1e13
     n_points = 1000
     main(log_path, c_min, c_max, n_points)
     
