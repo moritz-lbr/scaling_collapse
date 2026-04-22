@@ -10,7 +10,15 @@ import pynvml
 
 from config import create_config, load_simulation_parameters
 from train import run_once
-from utils import format_widths, parameter_summary, tree_to_python, _sorted_nodes, collect_files_with_ending, load_yaml_as_dict
+from utils import (
+    format_widths,
+    parameter_summary,
+    tree_to_python,
+    _sorted_nodes,
+    collect_files_with_ending,
+    load_yaml_as_dict,
+    resolve_dataset_path,
+)
 
 
 def run_experiment(config_path: Path, output_dir: Path) -> None:
@@ -19,9 +27,12 @@ def run_experiment(config_path: Path, output_dir: Path) -> None:
     cfg = create_config(sim_config)
 
     # Collect data from training configs and create config class
-    print(cfg.task)
-    print(collect_files_with_ending(cfg.task, "dataset_overview.yaml"))
-    data_config_path = collect_files_with_ending(cfg.task, "dataset_overview.yaml")[0]
+    task_path = resolve_dataset_path(cfg.task)
+    dataset_root = task_path if task_path.is_dir() else task_path.parent
+    dataset_overviews = collect_files_with_ending(dataset_root, "dataset_overview.yaml")
+    if not dataset_overviews:
+        raise FileNotFoundError(f"Could not find dataset_overview.yaml under {dataset_root}.")
+    data_config_path = dataset_overviews[0]
     data_config = load_yaml_as_dict(data_config_path)["training"]
 
     widths = cfg.widths
@@ -59,7 +70,7 @@ def run_experiment(config_path: Path, output_dir: Path) -> None:
     dataset_info = result.get("dataset_info")
     dataset_info["input_dimension"] = cfg.num_input_features
     dataset_info["output_dimension"] = cfg.num_output_features
-    dataset_info["task"] = cfg.task
+    dataset_info["task"] = str(task_path)
     per_layer_counts, total_params = parameter_summary(result["final_params"])
     num_hidden_layers = len(widths)
 
@@ -97,6 +108,7 @@ def run_experiment(config_path: Path, output_dir: Path) -> None:
         ("epochs", cfg.epochs),
         ("batch_size", cfg.batch_size),
         ("save_loss_frequency", cfg.save_loss_frequency),
+        ("loss_type", cfg.loss_type),
         ("training_data", dataset_info),
     ])
 

@@ -9,7 +9,17 @@ import optax
 from flax.traverse_util import flatten_dict
 import zarr
 
-from utils import mse_loss, cross_entropy_loss, create_state, load_teacher_dataset, load_all_cifar10_data
+from utils import (
+    mse_loss,
+    cross_entropy_loss,
+    create_state,
+    load_teacher_dataset,
+    load_all_cifar10_data,
+    load_winequality,
+    load_drybean,
+    load_yearpredictionmsd,
+    resolve_dataset_path,
+)
 
 
 def make_train_step(loss_fn):
@@ -74,8 +84,8 @@ def init_weight_store(zarr_path, params, total_steps, sep="/", dtype=None, time_
     )
     return root
 
-def init_term_store(root, total_steps, num_term_vectors, term_width, sep="/", time_chunk=64):
-    term_tree = {"terms": np.zeros((num_term_vectors, term_width), dtype=np.float32)}
+def init_term_store(root, total_steps, term_shape, sep="/", time_chunk=64):
+    term_tree = {"logits": np.zeros(term_shape, dtype=np.float32)}
     root.attrs["term_keys"] = _create_tree_datasets(
         root,
         term_tree,
@@ -100,11 +110,39 @@ def append_params(root, params, step, sep="/", cast_dtype=None):
 def append_first_layer_terms(root, term_matrix, step, sep="/", cast_dtype=None):
     append_tree(
         root,
-        {"terms": term_matrix},
+        {"logits": term_matrix},
         step,
         sep=sep,
         cast_dtype=cast_dtype,
     )
+
+def _is_cifar10_dataset(dataset_path: Path) -> bool:
+    return (
+        dataset_path.is_dir()
+        and (dataset_path / "data_batch_1").is_file()
+        and (dataset_path / "test_batch").is_file()
+    )
+
+def _is_winequality_dataset(dataset_path: Path) -> bool:
+    if dataset_path.is_file():
+        return dataset_path.suffix.lower() == ".csv" and dataset_path.name.startswith("winequality-")
+    return (
+        dataset_path.is_dir()
+        and any(
+            (dataset_path / filename).is_file()
+            for filename in ("winequality-red.csv", "winequality-white.csv")
+        )
+    )
+
+def _is_drybean_dataset(dataset_path: Path) -> bool:
+    if dataset_path.is_file():
+        return dataset_path.suffix.lower() == ".arff" and dataset_path.name == "Dry_Bean_Dataset.arff"
+    return dataset_path.is_dir() and (dataset_path / "Dry_Bean_Dataset.arff").is_file()
+
+def _is_yearpredictionmsd_dataset(dataset_path: Path) -> bool:
+    if dataset_path.is_file():
+        return dataset_path.name == "YearPredictionMSD.txt"
+    return dataset_path.is_dir() and (dataset_path / "YearPredictionMSD.txt").is_file()
 
 
 def run_once(
@@ -123,10 +161,34 @@ def run_once(
         n_train = total - n_test
         return n_train, n_test
 
-    rng_source = np.random.default_rng()
+    rng_source = np.random.default_rng(seed=0)
+    dataset_path = resolve_dataset_path(cfg.task)
 
-    if "teacher_data" in cfg.task or "regression_data" in cfg.task:
-        inputs, targets = load_teacher_dataset(cfg.task)
+    if _is_yearpredictionmsd_dataset(dataset_path):
+        xtr_np, ytr_np, xte, yte = load_yearpredictionmsd(dataset_path)
+        total_samples = int(xtr_np.shape[0] + xte.shape[0])
+        test_split = float(xte.shape[0] / total_samples)
+    elif _is_drybean_dataset(dataset_path):
+        xtr_np, ytr_np, xte, yte = load_drybean(
+            dataset_path,
+            test_split=test_split,
+            seed=0,
+            one_hot=True,
+        )
+        total_samples = int(xtr_np.shape[0] + xte.shape[0])
+    elif _is_winequality_dataset(dataset_path):
+        xtr_np, ytr_np, xte, yte = load_winequality(
+            dataset_path,
+            test_split=test_split,
+            seed=0,
+            one_hot=True,
+        )
+        total_samples = int(xtr_np.shape[0] + xte.shape[0])
+    elif _is_cifar10_dataset(dataset_path):
+        xtr_np, ytr_np, xte, yte = load_all_cifar10_data(dataset_path)
+        total_samples = int(xtr_np.shape[0] + xte.shape[0])
+    else:
+        inputs, targets = load_teacher_dataset(dataset_path)
         total_samples = int(inputs.shape[0])
         n_train, n_test = compute_split_counts(total_samples)
         permutation = rng_source.permutation(total_samples)
@@ -141,9 +203,6 @@ def run_once(
         yte = targets[test_idx]
         if set(train_idx) & set(test_idx):
             raise ValueError("Train and test sets overlap.")
-    else: 
-        xtr_np, ytr_np, xte, yte = load_all_cifar10_data()
-        total_samples = int(xtr_np.shape[0] + xte.shape[0])
   
 
     xtr_np = np.asarray(xtr_np, dtype=np.float32)
@@ -197,14 +256,20 @@ def run_once(
     train_step = make_train_step(loss_function)
     save_losses = make_loss_saver(loss_function)
 
-    total_steps = cfg.epochs * int(len(xtr_full) / cfg.batch_size)
+    steps_per_epoch = 1 if batch_size >= len(xtr_np) else len(xtr_np) // batch_size
+    total_steps = cfg.epochs * steps_per_epoch
     if isinstance(cfg.save_loss_frequency, str):
         total_steps_saved = cfg.epochs
     else:
         total_steps_saved = int(total_steps / cfg.save_loss_frequency)
 
     root = init_weight_store(run_dir / "weights.zarr", state.params, total_steps_saved + 1)
-    init_term_store(root, total_steps_saved + 1, num_term_vectors, cfg.widths[0])
+    term_shape = (
+        (num_term_vectors, cfg.widths[0])
+        if cfg.widths[-1] == 1
+        else (num_term_vectors, cfg.widths[0], cfg.widths[-1])
+    )
+    init_term_store(root, total_steps_saved + 1, term_shape)
     # weight_update_cov_root = init_weight_store(run_dir / "weights_cov_samples.zarr", state.params, (total_steps_saved + 1) * cfg.weight_update_covariance_samples)
 
     # Save initial weights if weight_monitoring is activated
@@ -248,7 +313,7 @@ def run_once(
                 append_first_layer_terms(root, first_layer_term_matrix, save_step_counter)
 
         else:
-            for start in range(0, len(indices), batch_size):
+            for start in range(0, len(indices) - batch_size + 1, batch_size):
                 batch_idx = indices[start:start + batch_size]
                 xb = jnp.asarray(xtr_np[batch_idx])
                 yb = jnp.asarray(ytr_np[batch_idx])
