@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, Tuple
 
 import numpy as np
 from tqdm import tqdm
@@ -32,15 +32,15 @@ def load_term_history(
 ) -> np.ndarray:
     root = zarr.open_group(Path(zarr_path), mode="r")
 
-    if "terms" in root.array_keys():
-        terms = root["terms"]
-        term_path = "terms"
-    elif "Dense_0" in root.group_keys() and "terms" in root["Dense_0"].array_keys():
-        terms = root["Dense_0"]["terms"]
+    if "logits" in root.array_keys():
+        terms = root["logits"]
+        term_path = "logits"
+    elif "Dense_0" in root.group_keys() and "logits" in root["Dense_0"].array_keys():
+        terms = root["Dense_0"]["logits"]
         term_path = "Dense_0/terms"
     else:
         raise ValueError(
-            "Dataset 'terms' not found at the Zarr root and legacy dataset 'Dense_0/terms' "
+            "Dataset 'terms' not found at the Zarr root and legacy dataset 'Dense_0/logits' "
             f"is also missing. Available root groups: {list(root.group_keys())}, "
             f"root arrays: {list(root.array_keys())}"
         )
@@ -56,7 +56,7 @@ def load_term_history(
             f"sample_index must be between 1 and {num_samples}, got {sample_index}."
         )
 
-    selected = np.float16(width) * np.asarray(terms[:, sample_index - 1, :], dtype=dtype)
+    selected = np.asarray(terms[:, sample_index - 1, :], dtype=dtype)
     if selected.shape[0] != num_steps:
         raise ValueError(
             f"Unexpected selected term history shape {selected.shape}; expected first dimension {num_steps}."
@@ -66,28 +66,45 @@ def load_term_history(
     return selected
 
 
-def compute_running_covariances(xj: np.ndarray, delta_t: int) -> np.ndarray:
+def compute_running_covariances_and_spectral_radii(
+    xj: np.ndarray,
+    delta_t: int,
+) -> Tuple[np.ndarray, np.ndarray]:
     """
     Build per-step covariance matrices for xj with shape (T, D).
-    Output shape is (T - delta_t, D, D), where cov[t] uses rows xj[t:t + delta_t].
+    Output shapes are (T - delta_t, D, D) for covariance matrices and
+    (T - delta_t,) for spectral radii, where cov[t] uses rows
+    xj[t:t + delta_t].
     """
     if xj.ndim != 2:
         raise ValueError(f"Expected xj with shape (T, D), got {xj.shape}")
     if delta_t < 1:
-        raise ValueError(f"delta_t must be at least 1, got {delta_t}")
-    if xj.shape[0] <= delta_t:
-        raise ValueError(
-            f"Need more than delta_t time steps to compute running covariances, got T={xj.shape[0]} and delta_t={delta_t}."
-        )
+        raise ValueError(f"delta_t must be >= 1, got {delta_t}")
 
     num_steps, num_features = xj.shape
-    cov = np.empty((num_steps - delta_t, num_features, num_features), dtype=np.float32)
-
-    for t in range(num_steps - delta_t):
-        cov[t] = np.cov(xj[t : t + delta_t].T, rowvar=True, bias=True).astype(
-            np.float32, copy=False
+    if num_features < 1:
+        raise ValueError(f"Expected at least one feature, got {num_features}")
+    num_windows = num_steps - delta_t
+    if num_windows < 0:
+        raise ValueError(
+            f"delta_t must be <= number of steps ({num_steps}), got {delta_t}"
         )
 
+    cov = np.empty((num_windows, num_features, num_features), dtype=np.float32)
+    spec_rad = np.empty((num_windows,), dtype=np.float32)
+
+    for t in range(num_windows):
+        cov_t = np.atleast_2d(
+            np.cov(xj[t : t + delta_t].T, rowvar=True, bias=True)
+        ).astype(np.float32, copy=False)
+        cov[t] = cov_t
+        spec_rad[t] = np.linalg.eigvalsh(cov_t)[-1] / num_features
+
+    return cov, spec_rad
+
+
+def compute_running_covariances(xj: np.ndarray, delta_t: int) -> np.ndarray:
+    cov, _ = compute_running_covariances_and_spectral_radii(xj, delta_t)
     return cov
 
 
@@ -116,13 +133,14 @@ def analyze_training_run(
 
     weights_path = log_path.parent
     xj = load_term_history(f"{weights_path}/weights.zarr", sample_index)
-    cov = compute_running_covariances(xj, delta_t)
+    cov, spec_rad = compute_running_covariances_and_spectral_radii(xj, delta_t)
 
     pbar.update(1)
     pbar.close()
 
-    np.save(output_dir / f"xj_terms_sample_{sample_index}.npy", xj)
-    np.save(output_dir / f"cov_terms_sample_{sample_index}.npy", cov)
+    np.save(output_dir / f"xj_logits_sample_{sample_index}.npy", xj)
+    np.save(output_dir / f"cov_logits_sample_{sample_index}.npy", cov)
+    np.save(output_dir / f"spec_rad_logits_sample_{sample_index}.npy", spec_rad)
 
 
 def main() -> None:

@@ -14,6 +14,7 @@ sys.path.insert(0, str(repo_root) + "/src")
 import yaml
 from tqdm import tqdm
 import numpy as np 
+from sklearn.feature_selection import mutual_info_regression
 
 
 def collect_files_with_ending(directory: Path, ending: str) -> List[Path]:
@@ -287,22 +288,65 @@ def compute_deltas(weight_history: List[Any], layer: str):
     return np.array(deltas), flattened[0], flattened[-1]
 
 
-def compute_running_covariances(xj: np.ndarray, delta_t: int) -> np.ndarray:
+def compute_running_covariances_and_spectral_radii(
+    xj: np.ndarray,
+    delta_t: int,
+) -> Tuple[np.ndarray, np.ndarray]:
     """
     Build per-step covariance matrices for xj with shape (T, D).
-    Output shape is (T, D, D), where cov[t] uses rows xj[:t+1].
+    Output shapes are (T - delta_t, D, D) for covariance matrices and
+    (T - delta_t,) for spectral radii, where cov[t] uses rows
+    xj[t:t+delta_t].
     """
     if xj.ndim != 2:
         raise ValueError(f"Expected xj with shape (T, D), got {xj.shape}")
+    if delta_t < 1:
+        raise ValueError(f"delta_t must be >= 1, got {delta_t}")
 
     num_steps, num_features = xj.shape
-    cov = np.empty((num_steps-delta_t, num_features, num_features), dtype=np.float32)
+    if num_features < 1:
+        raise ValueError(f"Expected at least one feature, got {num_features}")
+    num_windows = num_steps - delta_t
+    if num_windows < 0:
+        raise ValueError(
+            f"delta_t must be <= number of steps ({num_steps}), got {delta_t}"
+        )
 
-    for t in range(num_steps-delta_t):
+    cov = np.empty((num_windows, num_features, num_features), dtype=np.float32)
+    cov_log = np.empty((num_windows, num_features, num_features), dtype=np.float32)
+    spec_rad = np.empty((num_windows,), dtype=np.float32)
+
+    xj = xj - np.mean(xj, axis=1, keepdims=True)
+
+    for t in range(num_windows):
         # bias=True avoids NaNs at t=0 (single sample -> zeros matrix).
-        cov[t] = np.cov(xj[t: t + delta_t].T, rowvar=True, bias=True).astype(np.float32, copy=False)
-        # cov[t] = np.corrcoef(xj[t: t + delta_t].T, rowvar=True).astype(np.float32, copy=False)
+        cov_t = np.atleast_2d(
+            np.cov(xj[t: t + delta_t].T, rowvar=True, bias=True)
+        ).astype(np.float32, copy=False)
+        cov[t] = cov_t
 
+        # window_log = xj[t : t + delta_t]
+
+        # cov_log_t = np.atleast_2d(
+        # np.cov(window_log.T, rowvar=True, bias=True)
+        # ).astype(np.float32, copy=False)
+        # cov_log[t] = cov_log_t
+
+        # mean_log = window_log.mean(axis=0).astype(np.float32, copy=False)
+
+        # # E[g_i] for lognormal variables: exp(mu_i + 0.5 * var_i)
+        # exp_g = np.exp(mean_log + 0.5 * np.diag(cov_log_t)).astype(np.float32, copy=False)
+
+        # cov_t = np.outer(exp_g, exp_g) * (np.exp(cov_log_t) - 1.0)
+        # cov[t] = cov_t
+
+        spec_rad[t] = np.linalg.eigvalsh(cov_t)[-1] / num_features
+
+    return cov, spec_rad
+
+
+def compute_running_covariances(xj: np.ndarray, delta_t: int) -> np.ndarray:
+    cov, _ = compute_running_covariances_and_spectral_radii(xj, delta_t)
     return cov
 
 
@@ -329,7 +373,7 @@ def analyze_training_run(log_dir: Path, delta_t: int, output_dir: Path, layers: 
         xj = layer_vectors_first_last_and_deltas(
             f"{weights_path}/weights.zarr", layer, include=("kernel",)
         )
-        cov = compute_running_covariances(xj, delta_t)
+        cov, spec_rad = compute_running_covariances_and_spectral_radii(xj, delta_t)
 
         pbar.total = len(layers)
         pbar.n = layer_idx + 1
@@ -338,6 +382,7 @@ def analyze_training_run(log_dir: Path, delta_t: int, output_dir: Path, layers: 
 
         np.save(output_dir / f"xj_{layer}.npy", xj)
         np.save(output_dir / f"cov_{layer}.npy", cov)
+        np.save(output_dir / f"spec_rad_{layer}.npy", spec_rad)
 
 
 def main() -> None:
