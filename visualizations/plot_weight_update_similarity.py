@@ -208,12 +208,14 @@ def _ratio_from_series(
     previous_std = previous.step_norms_std[:min_len]
 
     with np.errstate(divide="ignore", invalid="ignore"):
-        ratio_mean = np.divide(
-            current_mean,
-            previous_mean,
-            out=np.full(min_len, np.nan, dtype=float),
-            where=previous_mean != 0,
-        )
+        # ratio_mean = np.divide(
+        #     current_mean,
+        #     previous_mean,
+        #     out=np.full(min_len, np.nan, dtype=float),
+        #     where=previous_mean != 0,
+        # )
+        res = np.log(current_mean) - np.log(2.0*previous_mean)
+        ratio_mean = [np.sum(res[:i+1]) for i in range(len(res))]
         current_rel_std = np.divide(
             current_std,
             current_mean,
@@ -496,6 +498,8 @@ def plot_weight_update_similarity(
     ax_step_norms_ratio.grid(True, alpha=0.3)
     ax_step_norms_ratio.set_xscale("log", base=10)
     ax_step_norms_ratio.tick_params(axis="both", labelsize=13)
+    # ax_step_norms_ratio.set_yscale("log")
+    ax_step_norms_ratio.set_ylim(-5,5)
 
     legend_titles = {
         "standard": "Standard parametrization",
