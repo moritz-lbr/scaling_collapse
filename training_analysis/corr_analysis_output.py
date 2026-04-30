@@ -27,9 +27,10 @@ def resolve_log_path(path: Path) -> Path:
 def load_term_history(
     zarr_path: str | Path,
     sample_index: int,
+    logit_index: int | None = None,
     *,
     dtype=np.float32,
-) -> np.ndarray:
+) -> tuple[np.ndarray, int, int]:
     root = zarr.open_group(Path(zarr_path), mode="r")
 
     if "logits" in root.array_keys():
@@ -45,25 +46,49 @@ def load_term_history(
             f"root arrays: {list(root.array_keys())}"
         )
 
-    if len(terms.shape) != 3:
+    if logit_index is not None and logit_index < 1:
+        raise ValueError(f"logit_index must be a positive integer, got {logit_index}.")
+
+    effective_logit_index = 1 if logit_index is None else logit_index
+    if len(terms.shape) == 3:
+        num_steps, num_samples, width = terms.shape
+        num_logits = 1
+        if sample_index < 1 or sample_index > num_samples:
+            raise ValueError(
+                f"sample_index must be between 1 and {num_samples}, got {sample_index}."
+            )
+        if effective_logit_index != 1:
+            raise ValueError(
+                f"Scalar logits only have logit_index 1, got {effective_logit_index}."
+            )
+        selected = np.asarray(terms[:, sample_index - 1, :], dtype=dtype)
+    elif len(terms.shape) == 4:
+        num_steps, num_samples, width, num_logits = terms.shape
+        if sample_index < 1 or sample_index > num_samples:
+            raise ValueError(
+                f"sample_index must be between 1 and {num_samples}, got {sample_index}."
+            )
+        if effective_logit_index > num_logits:
+            raise ValueError(
+                f"logit_index must be between 1 and {num_logits}, got {effective_logit_index}."
+            )
+        selected = np.asarray(
+            terms[:, sample_index - 1, :, effective_logit_index - 1],
+            dtype=dtype,
+        )
+    else:
         raise ValueError(
-            f"Expected dataset shape (T, N, width_0) for {term_path}, got {terms.shape}"
+            f"Expected dataset shape (T, N, width_0) or (T, N, width_0, output_dim) "
+            f"for {term_path}, got {terms.shape}"
         )
 
-    num_steps, num_samples, width = terms.shape
-    if sample_index < 1 or sample_index > num_samples:
-        raise ValueError(
-            f"sample_index must be between 1 and {num_samples}, got {sample_index}."
-        )
-
-    selected = np.asarray(terms[:, sample_index - 1, :], dtype=dtype)
     if selected.shape[0] != num_steps:
         raise ValueError(
             f"Unexpected selected term history shape {selected.shape}; expected first dimension {num_steps}."
         )
 
     # return np.log(np.abs(selected)+1e-12)  # Add small constant to avoid log(0)
-    return selected
+    return selected, effective_logit_index, num_logits
 
 
 def compute_running_covariances_and_spectral_radii(
@@ -94,8 +119,9 @@ def compute_running_covariances_and_spectral_radii(
     spec_rad = np.empty((num_windows,), dtype=np.float32)
 
     for t in range(num_windows):
+        log_xj = np.log(np.abs(xj[t : t + delta_t].T) + 1e-12)
         cov_t = np.atleast_2d(
-            np.cov(xj[t : t + delta_t].T, rowvar=True, bias=True)
+            np.cov(log_xj, rowvar=True, bias=True)
         ).astype(np.float32, copy=False)
         cov[t] = cov_t
         spec_rad[t] = np.linalg.eigvalsh(cov_t)[-1] / num_features
@@ -113,6 +139,7 @@ def analyze_training_run(
     delta_t: int,
     output_dir: Path | None,
     sample_index: int,
+    logit_index: int | None,
 ) -> None:
     log_path = resolve_log_path(log_dir)
     log_data = load_training_log(log_path)
@@ -132,15 +159,23 @@ def analyze_training_run(
     output_dir.mkdir(parents=True, exist_ok=True)
 
     weights_path = log_path.parent
-    xj = load_term_history(f"{weights_path}/weights.zarr", sample_index)
+    xj, effective_logit_index, num_logits = load_term_history(
+        f"{weights_path}/weights.zarr",
+        sample_index,
+        logit_index,
+    )
     cov, spec_rad = compute_running_covariances_and_spectral_radii(xj, delta_t)
 
     pbar.update(1)
     pbar.close()
 
-    np.save(output_dir / f"xj_logits_sample_{sample_index}.npy", xj)
-    np.save(output_dir / f"cov_logits_sample_{sample_index}.npy", cov)
-    np.save(output_dir / f"spec_rad_logits_sample_{sample_index}.npy", spec_rad)
+    suffix = f"_sample_{sample_index}"
+    if logit_index is not None or num_logits > 1:
+        suffix = f"{suffix}_logit_{effective_logit_index}"
+
+    np.save(output_dir / f"xj_logits{suffix}.npy", xj)
+    np.save(output_dir / f"cov_logits{suffix}.npy", cov)
+    np.save(output_dir / f"spec_rad_logits{suffix}.npy", spec_rad)
 
 
 def main() -> None:
@@ -166,6 +201,15 @@ def main() -> None:
         help="Which stored sample to analyze, using 1-based indexing (1..5).",
     )
     parser.add_argument(
+        "--logit-index",
+        type=int,
+        default=None,
+        help=(
+            "Which output logit to analyze for multivariate outputs, using "
+            "1-based indexing. Defaults to 1."
+        ),
+    )
+    parser.add_argument(
         "--output",
         type=Path,
         default=None,
@@ -173,7 +217,13 @@ def main() -> None:
     )
 
     args = parser.parse_args()
-    analyze_training_run(args.log_dir, args.delta_t, args.output, args.sample_index)
+    analyze_training_run(
+        args.log_dir,
+        args.delta_t,
+        args.output,
+        args.sample_index,
+        args.logit_index,
+    )
 
 
 if __name__ == "__main__":
