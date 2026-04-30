@@ -78,7 +78,7 @@ def save_covariance_snapshots(
     # vmax = float(np.max(covariances))
     # if np.isclose(vmin, vmax):
     #     vmax = vmin + 1e-12
-    vmin, vmax = np.quantile(covariances[selected_indices[0]].flatten(), [0.01, 0.99])
+    vmin, vmax = np.quantile(covariances[selected_indices[-1]].flatten(), [0.01, 0.99])
     colorbar_range = max(abs(vmin), abs(vmax))
     # colorbar_range = 1e-1
 
@@ -109,8 +109,8 @@ def save_covariance_snapshots(
     )
     cbar = fig.colorbar(image, cax=cbar_ax)
     # cbar.set_label(r"$Cov_t(\tilde{X}_i, \tilde{X}_j)$")
-    ax.set_xlabel(r"$\tilde{X}_i$", fontsize=15)
-    ax.set_ylabel(r"$\tilde{X}_j$", fontsize=15)
+    ax.set_xlabel(r"$\tilde{Y}_i^l$", fontsize=15)
+    ax.set_ylabel(r"$\tilde{Y}_j^l$", fontsize=15)
 
     training_steps = np.arange(n_snapshots, dtype=np.int64) * save_loss_frequency
     positive_mask = training_steps > 0
@@ -155,7 +155,7 @@ def save_covariance_snapshots(
         visible_window_end = max(window_end, x_min)
         left_window_line.set_xdata([visible_window_start, visible_window_start])
         right_window_line.set_xdata([visible_window_end, visible_window_end])
-        ax.set_title(r"$Cov(log \, \tilde{X}_i, log \, \tilde{X}_j)$" + f" (Training Step: {window_start}-{window_end})", fontsize=15)
+        ax.set_title(r"$Cov(\tilde{Y}_i^l, \tilde{Y}_j^l)$" + f" (Training Step: {window_start}-{window_end})", fontsize=15)
         frame_path = cov_log_path / f"cov_log_{frame_idx:03d}.png"
         fig.savefig(frame_path, dpi=150)
         frame_paths.append(frame_path)

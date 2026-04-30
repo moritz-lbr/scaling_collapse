@@ -77,6 +77,11 @@ def _sorted_entries(entries: List[Tuple[Any, str]]) -> List[Tuple[Any, str]]:
     return sorted(entries, key=lambda item: tuple(_width_key(item[1])))
 
 
+def _layer_width_log_ratio(layer: str, current_width: Any, previous_width: Any) -> float:
+    log_ratio = np.log(float(current_width) / float(previous_width))
+    return -log_ratio if layer == "Dense_1" else log_ratio
+
+
 def _build_combined_legend(
     legend_entries: Dict[str, List[Tuple[Any, str]]],
     legend_titles: Dict[str, str],
@@ -165,7 +170,7 @@ def collect_weight_metrics(weight_metrics_path: Path) -> Tuple[np.ndarray, np.nd
 def collect_loss_history(log_path: Path) -> np.ndarray:
     log_data = load_training_log(log_path)
     history = log_data.get("final_metrics", {}).get("history", {})
-    losses = history.get("train_loss")
+    losses = history.get("test_loss")
     if not losses:
         raise ValueError(f"No loss history found in {log_path}")
     return np.asarray(losses)
@@ -253,8 +258,15 @@ def load_save_loss_frequency(simulation_config_path: Path) -> int:
     return int(value)
 
 
+def _corr_frame_sort_key(frame_path: Path) -> Tuple[int, int | str]:
+    match = re.fullmatch(r"cov_log_(\d+)\.png", frame_path.name)
+    if match:
+        return (0, int(match.group(1)))
+    return (1, frame_path.name)
+
+
 def sorted_corr_frames(corr_dir: Path) -> List[Path]:
-    frame_paths = sorted(corr_dir.glob("cov_log_*.png"))
+    frame_paths = sorted(corr_dir.glob("cov_log_*.png"), key=_corr_frame_sort_key)
     if not frame_paths:
         raise FileNotFoundError(f"No correlation frames found in {corr_dir}")
     return frame_paths
@@ -365,6 +377,7 @@ def build_metrics_figure(
     smallest: int | None = None
     second_largest: int | None = None
     x_axis_for_ratio: np.ndarray | None = None
+    prev_num_nodes: int | None = None
     training_info: Dict[str, Any] | None = None
     task_name: str | None = None
     save_loss_frequency_for_title: int | None = None
@@ -412,10 +425,15 @@ def build_metrics_figure(
         legend_entries[scheme].append((line, label))
 
         if prev_step_norms is not None:
-            ratio = step_norms / prev_step_norms
+            # ratio = step_norms / prev_step_norms
+            res = np.log(step_norms) - np.log(prev_step_norms) - _layer_width_log_ratio(
+                layer, num_nodes, prev_num_nodes
+            )
+            ratio = np.array([np.sum(res[:i+1]) for i in range(len(res))])
             ax_step_norms_ratio.plot(x_axis[:-1], ratio, color=color)
-
+    
         prev_step_norms = step_norms
+        prev_num_nodes = num_nodes
         x_axis_for_ratio = x_axis[:-1]
 
     if training_info is None or task_name is None or save_loss_frequency_for_title is None:
@@ -436,7 +454,7 @@ def build_metrics_figure(
     loss_log.set_xscale("log")
     loss_log.set_yscale("log")
     loss_log.set_xlabel(x_label, fontsize=16)
-    loss_log.set_ylabel(x_label, fontsize=16)
+    loss_log.set_ylabel(r"Test Loss [log]", fontsize=16)
     loss_log.grid(True, which="both", alpha=0.3)
     loss_log.tick_params(axis="both", labelsize=13)
     loss_log.legend(loc="upper right", frameon=True, borderaxespad=0.0, fontsize=16)
@@ -452,7 +470,7 @@ def build_metrics_figure(
 
     ax_step_norms.set_xlabel(x_label, fontsize=16)
     ax_step_norms.set_ylabel(
-        r"$\| \Delta \vec{W}_{t_{i}}^{\," + layer[-1] + r"} \| = \| \vec{W}_{t_{i+1}}^{\," + layer[-1] + r"} - \vec{W}_{t_{i}}^{\," + layer[-1] + r"}\|$",
+        r"$\| \Delta \vec{W}_{t_{i}}^{\," + layer[-1] + r"} \|^2 = \| \vec{W}_{t_{i+1}}^{\," + layer[-1] + r"} - \vec{W}_{t_{i}}^{\," + layer[-1] + r"}\|^2$",
         fontsize=16,
     )
     ax_step_norms.grid(True, alpha=0.3)
@@ -460,13 +478,15 @@ def build_metrics_figure(
     ax_step_norms.tick_params(axis="both", labelsize=13)
 
     ax_step_norms_ratio.set_xlabel(x_label, fontsize=16)
-    ax_step_norms_ratio.set_ylabel(r"$R(t) = \frac{\| \Delta \vec{W}_{t_{i}}^{\," + layer[-1] + r"} \|(2N)}{\| \Delta \vec{W}_{t_{i}}^{\," + layer[-1] + r"} \|(N)}$", fontsize=16)
+    # ax_step_norms_ratio.set_ylabel(r"$R(t) = \frac{\| \Delta \vec{W}_{t_{i}}^{\," + layer[-1] + r"} \|(2N)}{\| \Delta \vec{W}_{t_{i}}^{\," + layer[-1] + r"} \|(N)}$", fontsize=16)
+    ax_step_norms_ratio.set_ylabel(r"$R(t_i) = \sum_{j=1}^{t_i} r^{\log}\, (\tau_j)$", fontsize=16)
     ax_step_norms_ratio.grid(True, alpha=0.3)
     ax_step_norms_ratio.set_xscale("log", base=10)
     ax_step_norms_ratio.tick_params(axis="both", labelsize=13)
     ymin, ymax = np.quantile(ratio.flatten(), [0.01, 0.99])
-    ax_step_norms_ratio.set_ylim(ymin, ymax)
-    ax_step_norms_ratio.legend(loc="upper left", frameon=True, borderaxespad=0.0, fontsize=16)
+    # ax_step_norms_ratio.set_ylim(-10, 10)
+    # ax_step_norms_ratio.plot([], [], color="white", linewidth=1.8, label=r"$r\, (\tau_j) = \log (\frac{\langle g_j^l(\tau_j) \rangle_{mn}}{\langle g_j^l(\tau_j) \rangle_{n}})$", fontsize=16)
+    # ax_step_norms_ratio.legend(loc="upper left", frameon=True, borderaxespad=0.0, fontsize=16)
 
     legend_subtitle = r"Layer Widths: $n^0 \times n^1$"
     legend_titles = {
@@ -504,6 +524,20 @@ def build_metrics_figure(
         fontsize=15,
         bbox=dict(facecolor="white", edgecolor="black", boxstyle="round,pad=0.4"),
     )
+
+    ax_step_norms_ratio.text(
+        0.1,
+        0.1,
+        (
+            r"$r^{\log}\, (\tau_j) = \log (\frac{\langle g_j^l(\tau_j) \rangle_{mn}}{\langle g_j^l(\tau_j) \rangle_{n}})$"
+        ),
+        transform=ax_step_norms_ratio.transAxes,
+        ha="left",
+        va="bottom",
+        fontsize=15,
+        bbox=dict(facecolor="white", edgecolor="black", boxstyle="round,pad=0.4"),
+    )
+
 
     if layer == "all_weights":
         layer_label = "All Weights of The Network"
