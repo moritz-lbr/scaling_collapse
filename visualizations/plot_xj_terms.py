@@ -68,7 +68,7 @@ def build_raw_mean_label(layer: str) -> str:
 
 def build_log_mean_label(layer: str) -> str:
     if is_logits_label(layer):
-        return r"$\langle \log (\tilde{f}_j) \rangle_{n_l}$"
+        return r"$\langle \log |\tilde{f}_j| \rangle_{n_l}$"
 
     layer_index = format_layer_index(layer)
     return rf"$\langle \log (\tilde{{X}}^{layer_index}_j) \rangle_{{n_{{{layer_index}}}}}$"
@@ -77,7 +77,7 @@ def build_log_mean_label(layer: str) -> str:
 def build_centered_label(layer: str) -> str:
     if is_logits_label(layer):
         return (
-            r"$\{\log (\tilde{f}_j) - \langle \log (\tilde{f}_j) \rangle_{n_l}\}_{j=1...n_l}$"
+            r"$\{\log |\tilde{f}_j| - \langle \log |\tilde{f}_j| \rangle_{n_l}\}_{j=1...n_l}$"
         )
 
     layer_index = format_layer_index(layer)
@@ -108,7 +108,7 @@ def build_value_label(layer: str) -> str:
 
 def build_log_label(layer: str) -> str:
     if is_logits_label(layer):
-        return r"$\{\log (\tilde{f}_j)\}_{j=1...n_l}$"
+        return r"$\{\log |\tilde{f}_j|\}_{j=1...n_l}$"
 
     layer_index = format_layer_index(layer)
     return rf"$\{{\log (\tilde{{X}}^{layer_index}_j)\}}_{{j=1...n_{{{layer_index}}}}}$"
@@ -125,12 +125,20 @@ def plot_time_series(
             f"save_loss_frequency must be >= 1, got {save_loss_frequency}"
         )
 
-    mean_log_series = np.mean(series, axis=1, keepdims=True)
-    centered_series = series - mean_log_series
-    exp_series = np.exp(series.astype(np.float64))
-    exp_mean_series = np.exp(mean_log_series[:, 0])
-    centered_exp_series = exp_series - exp_mean_series[:, None]
-    mean_log_series = mean_log_series[:, 0]
+    if is_logits_label(layer):
+        raw_series = series
+        mean_raw_series = np.mean(raw_series, axis=1)
+        centered_raw_series = raw_series - mean_raw_series[:, None]
+        log_series = np.log(np.abs(raw_series).astype(np.float64)+1e-12)
+        mean_log_series = np.mean(log_series, axis=1)
+        centered_log_series = log_series - mean_log_series[:, None]
+    else:
+        log_series = series
+        mean_log_series = np.mean(log_series, axis=1)
+        centered_log_series = log_series - mean_log_series[:, None]
+        raw_series = np.exp(log_series.astype(np.float64))
+        mean_raw_series = np.exp(mean_log_series)
+        centered_raw_series = raw_series - mean_raw_series[:, None]
     num_features = series.shape[1]
     label_fontsize = 16
 
@@ -140,12 +148,12 @@ def plot_time_series(
         raise ValueError("Need at least one positive training step for a log-scaled x-axis.")
 
     steps = steps[positive_mask]
-    series = series[positive_mask]
-    centered_series = centered_series[positive_mask]
-    exp_series = exp_series[positive_mask]
-    exp_mean_series = exp_mean_series[positive_mask]
-    centered_exp_series = centered_exp_series[positive_mask]
+    raw_series = raw_series[positive_mask]
+    mean_raw_series = mean_raw_series[positive_mask]
+    centered_raw_series = centered_raw_series[positive_mask]
+    log_series = log_series[positive_mask]
     mean_log_series = mean_log_series[positive_mask]
+    centered_log_series = centered_log_series[positive_mask]
 
     fig, axes = plt.subplots(
         nrows=2,
@@ -158,15 +166,15 @@ def plot_time_series(
     plot_specs = (
         (
             axes[0, 0],
-            exp_series,
-            exp_mean_series,
+            raw_series,
+            mean_raw_series,
             build_value_label(layer),
             build_raw_mean_label(layer),
             None,
         ),
         (
             axes[0, 1],
-            series,
+            log_series,
             mean_log_series,
             build_log_label(layer),
             build_log_mean_label(layer),
@@ -174,7 +182,7 @@ def plot_time_series(
         ),
         (
             axes[1, 0],
-            centered_exp_series,
+            centered_raw_series,
             None,
             build_centered_raw_label(layer),
             None,
@@ -182,7 +190,7 @@ def plot_time_series(
         ),
         (
             axes[1, 1],
-            centered_series,
+            centered_log_series,
             None,
             build_centered_label(layer),
             None,
