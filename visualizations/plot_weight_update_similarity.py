@@ -71,6 +71,17 @@ def _sorted_entries(entries: List[Tuple[Any, str]]) -> List[Tuple[Any, str]]:
     return sorted(entries, key=lambda item: tuple(_width_key(item[1])))
 
 
+def _layer_width_log_ratio(
+    layer: str,
+    current_network_info: Dict[str, Any],
+    previous_network_info: Dict[str, Any],
+) -> float:
+    current_width = float(current_network_info["nodes_per_layer"]["Dense_0"])
+    previous_width = float(previous_network_info["nodes_per_layer"]["Dense_0"])
+    log_ratio = np.log(current_width / previous_width)
+    return -log_ratio if layer == "Dense_1" else log_ratio
+
+
 def _build_combined_legend(
     legend_entries: Dict[str, List[Tuple[Any, str]]],
     legend_titles: Dict[str, str],
@@ -195,6 +206,7 @@ def _plot_with_uncertainty(
 def _ratio_from_series(
     current: "PlotSeries",
     previous: "PlotSeries",
+    layer: str,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     min_len = min(
         len(current.step_norms_mean),
@@ -214,7 +226,19 @@ def _ratio_from_series(
         #     out=np.full(min_len, np.nan, dtype=float),
         #     where=previous_mean != 0,
         # )
-        res = np.log(current_mean) - np.log(2.0*previous_mean)
+
+        def sliding_mean_10(x):
+            x = np.asarray(x, dtype=float)
+            out = np.convolve(x, np.ones(10) / 10, mode="valid")
+            return np.r_[np.mean(x[:10])*np.ones(9), out]
+
+        time_window_means_current = sliding_mean_10(current_mean)
+        time_window_means_previous = sliding_mean_10(previous_mean)
+        # print(time_window_means_current, time_window_means_previous)
+        # res = (current_mean - 2.0*previous_mean)/(abs(current_mean) + abs(previous_mean))
+        res = np.log(current_mean) - np.log(previous_mean) - _layer_width_log_ratio(
+            layer, current.network_info, previous.network_info
+        )
         ratio_mean = [np.sum(res[:i+1]) for i in range(len(res))]
         current_rel_std = np.divide(
             current_std,
@@ -401,7 +425,7 @@ def plot_weight_update_similarity(
         if not compute_flag:
             batch_size = float(dataset_info.get("batch_size"))
             c_opt_compute = c_opt_compute / (batch_size * pareto_points["parameters"])
-        loss_log.scatter(c_opt_compute, pareto_points["min_loss"], color="red", label="Compute Optimal Points")
+        loss_log.scatter(c_opt_compute, pareto_points["min_loss"], color="black", label="Compute-optimal points: \n" + r"$(c^{*}(p),\, L(c^{*}(p)))$")
 
     previous_series: PlotSeries | None = None
     for series in series_list:
@@ -448,7 +472,9 @@ def plot_weight_update_similarity(
                 print("Slope:", slope)
                 print("Intercetp:", intercept)
 
-            ratio_x_axis, ratio_mean, ratio_std = _ratio_from_series(series, previous_series)
+            ratio_x_axis, ratio_mean, ratio_std = _ratio_from_series(
+                series, previous_series, layer
+            )
             _plot_with_uncertainty(
                 ax_step_norms_ratio,
                 ratio_x_axis,
@@ -490,16 +516,18 @@ def plot_weight_update_similarity(
     ax_step_norms.set_ylabel(r"$\| \Delta \vec{W}_{t_{i}}^{\," + layer[-1] + r"} \|^2 = \| \vec{W}_{t_{i+1}}^{\," + layer[-1] + r"} - \vec{W}_{t_{i}}^{\," + layer[-1] + r"}\|^2$", fontsize=16)
     ax_step_norms.grid(True, alpha=0.3)
     ax_step_norms.set_xscale("log", base=10)
-    # ax_step_norms.set_yscale("log")
+    ax_step_norms.set_yscale("log")
     ax_step_norms.tick_params(axis="both", labelsize=13)
 
     ax_step_norms_ratio.set_xlabel(x_label, fontsize=16)
-    ax_step_norms_ratio.set_ylabel(r"$R(t)$", fontsize=16)
+    ax_step_norms_ratio.set_ylabel(r"$R(t_i) = \sum_{j=1}^{t_i} r^{\log}\, (\tau_j)$", fontsize=16)
     ax_step_norms_ratio.grid(True, alpha=0.3)
     ax_step_norms_ratio.set_xscale("log", base=10)
     ax_step_norms_ratio.tick_params(axis="both", labelsize=13)
+    ax_step_norms_ratio.plot([], [], color="white", linewidth=1.8, label=r"$r^{\log}\, (\tau_j) = \log (\frac{\langle g_j^l(\tau_j) \rangle_{mn}}{\langle g_j^l(\tau_j) \rangle_{n}})$")
     # ax_step_norms_ratio.set_yscale("log")
-    ax_step_norms_ratio.set_ylim(-5,5)
+    ax_step_norms_ratio.legend(loc="upper left", frameon=True, borderaxespad=0.0, fontsize=16)
+    # ax_step_norms_ratio.set_ylim(-10,10)
 
     legend_titles = {
         "standard": "Standard parametrization",
