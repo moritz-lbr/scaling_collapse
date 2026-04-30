@@ -11,10 +11,7 @@ set -euo pipefail
 
 usage() {
   cat <<'EOF'
-Usage: ./analyze_cov_submit.sh <JOB_DIR> [SNAPSHOT_STRIDE] [DELTA_T] [LAYERS_CSV] [FRAME_DURATION_MS] [--output_sample_index N]
-
-Options:
-  --output_sample_index N   1-based sample index for the logits/output-term covariance analysis (default: 1)
+Usage: ./analyze_cov_submit.sh <JOB_DIR> [SNAPSHOT_STRIDE] [DELTA_T] [LAYERS_CSV] [FRAME_DURATION_MS]
 EOF
 }
 
@@ -22,40 +19,18 @@ EOF
 #   ./analyze_cov_submit.sh /path/to/logs/job-12818757
 #   ./analyze_cov_submit.sh /path/to/logs/job-12818757 10 10
 #   ./analyze_cov_submit.sh /path/to/logs/job-12818757 10 10 Dense_0,Dense_1
-OUTPUT_SAMPLE_INDEX=1
-POSITIONAL_ARGS=()
+if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
+  usage
+  exit 0
+fi
 
-while (($# > 0)); do
-  case "$1" in
-    -h|--help)
-      usage
-      exit 0
-      ;;
-    --output_sample_index)
-      if (($# < 2)); then
-        echo "Missing value for --output_sample_index"
-        exit 1
-      fi
-      OUTPUT_SAMPLE_INDEX="$2"
-      shift 2
-      ;;
-    --output_sample_index=*)
-      OUTPUT_SAMPLE_INDEX="${1#*=}"
-      shift
-      ;;
-    --*)
-      echo "Unknown option: $1"
-      usage
-      exit 1
-      ;;
-    *)
-      POSITIONAL_ARGS+=("$1")
-      shift
-      ;;
-  esac
+for arg in "$@"; do
+  if [[ "${arg}" == --* ]]; then
+    echo "Unknown option: ${arg}"
+    usage
+    exit 1
+  fi
 done
-
-set -- "${POSITIONAL_ARGS[@]}"
 
 JOB_DIR=${1:-}
 if [[ -z "${JOB_DIR}" ]]; then
@@ -78,11 +53,6 @@ if ! [[ "${FRAME_DURATION_MS}" =~ ^[0-9]+$ ]] || (( FRAME_DURATION_MS < 1 )); th
   exit 1
 fi
 
-if ! [[ "${OUTPUT_SAMPLE_INDEX}" =~ ^[0-9]+$ ]] || (( OUTPUT_SAMPLE_INDEX < 1 )); then
-  echo "OUTPUT_SAMPLE_INDEX must be a positive integer, got: ${OUTPUT_SAMPLE_INDEX}"
-  exit 1
-fi
-
 N=$(ls -1 "${JOB_DIR}"/*/training_log.json 2>/dev/null | wc -l | tr -d ' ')
 
 if [[ "${N}" -eq 0 ]]; then
@@ -91,10 +61,24 @@ if [[ "${N}" -eq 0 ]]; then
 fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [[ ! -f "${SCRIPT_DIR}/analyze_cov_script.sh" && -n "${SLURM_SUBMIT_DIR:-}" && -f "${SLURM_SUBMIT_DIR}/analyze_cov_script.sh" ]]; then
+  SCRIPT_DIR="$(cd "${SLURM_SUBMIT_DIR}" && pwd)"
+fi
+if [[ ! -f "${SCRIPT_DIR}/analyze_cov_script.sh" && "${JOB_DIR}" == *"/experiments/"* ]]; then
+  PROJECT_ROOT="${JOB_DIR%%/experiments/*}"
+  if [[ -f "${PROJECT_ROOT}/analyze_cov_script.sh" ]]; then
+    SCRIPT_DIR="$(cd "${PROJECT_ROOT}" && pwd)"
+  fi
+fi
+if [[ ! -f "${SCRIPT_DIR}/analyze_cov_script.sh" ]]; then
+  echo "Could not locate analyze_cov_script.sh from ${SCRIPT_DIR}."
+  exit 1
+fi
+SOURCE_DIR="${SCRIPT_DIR}"
 
-export JOB_DIR SNAPSHOT_STRIDE DELTA_T LAYERS_CSV FRAME_DURATION_MS OUTPUT_SAMPLE_INDEX N
+export JOB_DIR SNAPSHOT_STRIDE DELTA_T LAYERS_CSV FRAME_DURATION_MS N SOURCE_DIR
 
 sbatch \
   --export=ALL \
   --array=1-"${N}" \
-  analyze_cov_script.sh
+  "${SCRIPT_DIR}/analyze_cov_script.sh"
